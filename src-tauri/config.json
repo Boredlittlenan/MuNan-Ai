@@ -6,7 +6,7 @@
     },
     "openai": {
         "api_key": "sk-IKRtbwKXGS3hDwd9BEjvBftBlwXBsqioaaDO200UfiTBKDNq",
-        "base_url": "https://api.openai.com/v1/chat/completions",
+        "base_url": "https://api.chatanywhere.tech/v1",
         "model": "gpt-4o-mini"
     },
     "deepseek": {

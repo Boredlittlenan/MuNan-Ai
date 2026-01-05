@@ -1,15 +1,15 @@
-use crate::ai::{openai_like, types::ChatMessage};
+use crate::ai::{openai_like::chat_api, types::ChatMessage};
 use crate::config::ModelConfig;
 
 pub async fn call_openai(
     messages: Vec<ChatMessage>,
     cfg: ModelConfig
 ) -> Result<String, String> {
-    openai_like::chat_mimo_debug(
+    chat_api(
         &cfg.base_url,
         &cfg.api_key,
         &cfg.model,
-        messages,  // ✅ 传整个消息数组，而不是 prompt
+        messages,
     )
     .await
 }

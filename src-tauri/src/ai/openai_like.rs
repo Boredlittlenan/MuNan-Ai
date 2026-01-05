@@ -1,7 +1,7 @@
 use crate::ai::types::ChatMessage;
 use serde_json::json;
 
-/// 调用 MIMO API 进行调试聊天
+/// 调用 OpenAI、豆包或千问 API 进行调试聊天
 /// 
 /// # 参数
 /// - `url`: API 的 URL 地址
@@ -11,7 +11,7 @@ use serde_json::json;
 /// 
 /// # 返回
 /// 成功时返回聊天响应内容，失败时返回错误信息
-pub async fn chat_mimo_debug(
+pub async fn chat_api(
     url: &str,
     api_key: &str,
     model: &str,
@@ -46,9 +46,9 @@ pub async fn chat_mimo_debug(
         .map_err(|e| format!("读取响应失败: {}", e))?;
 
     // 如果状态码不是成功状态，返回错误信息
-    if !status.is_success() {
+    if !status.is_success()  {
         return Err(format!(
-            "MIMO API 调用失败\nHTTP 状态: {}\n响应内容: {}",
+            "API 调用失败\nHTTP 状态: {}\n响应内容: {}",
             status, text
         ));
     }

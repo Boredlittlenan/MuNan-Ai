@@ -51,6 +51,7 @@ async fn chat_with_ai(
     let reply = match model.as_str() {
         "openai" => ai::openai::call_openai(messages.clone(), cfg.openai).await,
         "mimo" => ai::mimo::call_mimo(messages.clone(), cfg.mimo).await,
+        "qwen" => ai::qwen::call_qwen(messages.clone(), cfg.qwen).await,
         _ => Err("未知模型".into()),
     };
 

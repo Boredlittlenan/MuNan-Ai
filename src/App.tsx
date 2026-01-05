@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Link } from "react-router-dom";
 
 // 定义支持的模型类型
 // "openai" 表示 OpenAI 的 GPT 模型
@@ -141,7 +142,7 @@ function App() {
     <div style={{ padding: 20, fontFamily: "sans-serif", maxWidth: 800 }}>
       <h2>🧠 AI 对话</h2>
 
-      <div style={{ display: "flex", marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
         <select
           value={model}
           onChange={(e) => setModel(e.target.value as ModelType)}
@@ -153,6 +154,9 @@ function App() {
           <option value="mimo">小米 MIMO</option>
         </select>
         <button onClick={createNewConversation}>新建对话</button>
+        <Link to="/settings">
+          <button>设置</button>
+        </Link>
       </div>
 
       <div style={{ display: "flex", marginBottom: 10 }}>
