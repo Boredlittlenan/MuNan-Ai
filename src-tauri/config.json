@@ -1,0 +1,22 @@
+{
+    "mimo": {
+        "api_key": "sk-c4esmrx4zewu6f27k4m4450dn7zs88b6ok12r58ejrsvicds",
+        "base_url": "https://api.xiaomimimo.com/v1/chat/completions",
+        "model": "mimo-v2-flash"
+    },
+    "openai": {
+        "api_key": "sk-IKRtbwKXGS3hDwd9BEjvBftBlwXBsqioaaDO200UfiTBKDNq",
+        "base_url": "https://api.openai.com/v1/chat/completions",
+        "model": "gpt-4o-mini"
+    },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": "deepseek-xxxx",
+        "model": "ds-model"
+    },
+    "qwen": {
+        "base_url": "https://api.qwen.com/v1",
+        "api_key": "qwen-xxxx",
+        "model": "qwen-model"
+    }
+}

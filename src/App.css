@@ -1,0 +1,78 @@
+/* 添加全局样式 */
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background-color: #f4f4f9;
+  color: #333;
+}
+
+/* 设置容器样式 */
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+  background: #fff;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+}
+
+/* 标题样式 */
+h2 {
+  color: #4a90e2;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+/* 消息显示区域样式 */
+.message-box {
+  border: 1px solid #ccc;
+  height: 360px;
+  padding: 10px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  background: #fafafa;
+  border-radius: 4px;
+}
+
+/* 消息样式 */
+.message {
+  margin-bottom: 8px;
+}
+
+.message strong {
+  color: #4a90e2;
+}
+
+/* 输入框和按钮样式 */
+input[type="text"] {
+  width: 75%;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-right: 8px;
+  font-size: 14px;
+}
+
+button {
+  padding: 10px 20px;
+  background-color: #4a90e2;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+/* 下拉框样式 */
+select {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
