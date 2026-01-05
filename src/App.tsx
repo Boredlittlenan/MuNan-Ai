@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Link } from "react-router-dom";
+import './app.css';
 
 // 定义支持的模型类型
 // "openai" 表示 OpenAI 的 GPT 模型
@@ -208,7 +209,7 @@ function App() {
             {currentConversation ? (
               currentConversation.messages.map((msg, i) => (
                 <div key={i} style={{ marginBottom: 8 }}>
-                  <strong>{msg.role === "user" ? "你" : "AI"}：</strong>
+                  <strong>{msg.role === "user" ? "用户" : "AI"}：</strong>
                   <span style={{ marginLeft: 4 }}>{msg.content}</span>
                 </div>
               ))
@@ -226,16 +227,16 @@ function App() {
 
       <div>
         <input
+          className="input-box"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          style={{ width: "75%", marginRight: 8 }}
           placeholder="输入内容..."
           disabled={loading || !currentConversation}
           onKeyDown={(e) => {
             if (e.key === "Enter") sendMessage();
           }}
         />
-        <button onClick={sendMessage} disabled={loading || !currentConversation}>
+        <button className="btn-send" onClick={sendMessage} disabled={loading || !currentConversation}>
           {loading ? "思考中…" : "发送"}
         </button>
       </div>

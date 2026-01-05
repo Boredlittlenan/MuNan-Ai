@@ -15,8 +15,8 @@
         "model": "ds-model"
     },
     "qwen": {
-        "base_url": "https://api.qwen.com/v1",
-        "api_key": "qwen-xxxx",
-        "model": "qwen-model"
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "api_key": "sk-b14ce46e97ef4897b7aeedf74531348f",
+        "model": "qwen-plus"
     }
 }
