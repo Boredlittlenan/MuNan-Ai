@@ -4,7 +4,31 @@ mod config;
 use ai::types::ChatMessage;
 use config::AppConfig;
 use std::fs;
-use tauri::command;
+use std::sync::Mutex;
+use tauri::{command, State};
+
+// 定义全局状态以存储聊天记录
+struct ChatState {
+    history: Mutex<Vec<Message>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct Message {
+    role: String,
+    content: String,
+}
+
+#[command]
+fn save_chat_history(state: State<ChatState>, messages: Vec<Message>) {
+    let mut history = state.history.lock().unwrap();
+    *history = messages;
+}
+
+#[command]
+fn load_chat_history(state: State<ChatState>) -> Vec<Message> {
+    let history = state.history.lock().unwrap();
+    history.clone()
+}
 
 fn load_config() -> Result<AppConfig, String> {
     let text = fs::read_to_string("config.json").map_err(|_| "未找到 config.json")?;
@@ -36,11 +60,12 @@ async fn chat_with_ai(
     }
 }
 
-
-
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![chat_with_ai])
+        .manage(ChatState {
+            history: Mutex::new(Vec::new()),
+        })
+        .invoke_handler(tauri::generate_handler![chat_with_ai, save_chat_history, load_chat_history])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
