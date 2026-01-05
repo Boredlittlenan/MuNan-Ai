@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Link } from "react-router-dom";
-import './app.css';
+import "./styles/App.css";
+
+
 
 // 定义支持的模型类型
 // "openai" 表示 OpenAI 的 GPT 模型
@@ -64,17 +66,22 @@ function App() {
     setCurrentConversationId(newConversation.id);
   };
 
+  // 删除对话的函数
   const deleteConversation = (id: string) => {
+    // 更新对话状态，过滤掉指定 ID 的对话
     setConversations((prev) => ({
       ...prev,
       [model]: prev[model].filter((conv) => conv.id !== id),
     }));
+    // 如果当前对话是被删除的对话，则清空当前对话 ID
     if (currentConversationId === id) {
       setCurrentConversationId(null);
     }
   };
 
+  // 重命名对话的函数
   const renameConversation = (id: string, newName: string) => {
+    // 更新对话状态，将指定 ID 的对话名称更新为新名称
     setConversations((prev) => ({
       ...prev,
       [model]: prev[model].map((conv) =>
@@ -83,12 +90,17 @@ function App() {
     }));
   };
 
+  // 发送消息的函数
   const sendMessage = async () => {
+    // 如果输入为空、正在加载或当前没有选中对话，则直接返回
     if (!input.trim() || loading || !currentConversation) return;
 
+    // 创建用户消息对象
     const userMsg: Message = { role: "user", content: input };
+    // 将用户消息添加到当前对话的消息列表中
     const updatedMessages = [...currentConversation.messages, userMsg];
 
+    // 更新对话状态，添加用户消息
     setConversations((prev) => ({
       ...prev,
       [model]: prev[model].map((conv) =>
@@ -97,21 +109,27 @@ function App() {
           : conv
       ),
     }));
+    // 清空输入框内容
     setInput("");
+    // 设置加载状态为 true
     setLoading(true);
 
     try {
+      // 将消息转换为 API 所需的格式
       const apiMessages = updatedMessages.map((m) => ({
         role: m.role === "ai" ? "assistant" : "user",
         content: m.content,
       }));
 
+      // 调用后端接口获取 AI 回复
       const aiReply = await invoke<string>("chat_with_ai", {
         model,
         messages: apiMessages,
       });
 
+      // 创建 AI 消息对象
       const aiMsg: Message = { role: "ai", content: aiReply };
+      // 更新对话状态，添加 AI 消息
       setConversations((prev) => ({
         ...prev,
         [model]: prev[model].map((conv) =>
@@ -121,6 +139,7 @@ function App() {
         ),
       }));
     } catch (e: any) {
+      // 如果调用失败，生成错误消息
       const errMsg =
         typeof e === "string" ? e : e?.toString?.() || JSON.stringify(e);
       setConversations((prev) => ({
@@ -135,6 +154,7 @@ function App() {
         ),
       }));
     } finally {
+      // 无论成功与否，最后将加载状态设置为 false
       setLoading(false);
     }
   };
