@@ -85,6 +85,7 @@ select {
 .conversation-list h2 {}
 
 .conversation-list>div {
+  height         : 50px;
   display        : flex;
   gap            : 10px;
   align-items    : center;
@@ -160,6 +161,51 @@ select {
 .chat-empty {
   color: #888;
 }
+
+/* =========================
+   聊天气泡布局
+   ========================= */
+
+/* 每一行消息 */
+.chat-line {
+  display      : flex;
+  margin-bottom: 10px;
+}
+
+/* AI 在左 */
+.chat-ai {
+  justify-content: flex-start;
+}
+
+/* 用户在右 */
+.chat-user {
+  justify-content: flex-end;
+}
+
+/* 气泡本体 */
+.chat-bubble {
+  max-width    : 70%;
+  padding      : 10px 12px;
+  border-radius: 8px;
+  line-height  : 1.5;
+  word-break   : break-word;
+  white-space  : pre-wrap;
+  font-size    : 14px;
+}
+
+/* AI 气泡样式 */
+.chat-ai .chat-bubble {
+  background-color: #e6f7ff;
+  border          : 1px solid #b3e5ff;
+
+}
+
+/* 用户气泡样式 */
+.chat-user .chat-bubble {
+  background-color: #f9f9f9;
+  border          : 1px solid #ddd;
+}
+
 
 
 /* =========================================================

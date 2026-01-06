@@ -92,15 +92,35 @@ const loadConversationsFromLocalStorage =
       };
   };
 
+/**
+ * 保存用户状态到 localStorage
+ */
+const saveUserStateToLocalStorage = (model: ModelType, conversationId: string | null) => {
+  localStorage.setItem("userState", JSON.stringify({ model, conversationId }));
+};
+
+/**
+ * 从 localStorage 加载用户状态
+ */
+const loadUserStateFromLocalStorage = (): { model: ModelType; conversationId: string | null } => {
+  const saved = localStorage.getItem("userState");
+  return saved ? JSON.parse(saved) : { model: "openai", conversationId: null };
+};
+
 /* =========================
    三、主组件
    ========================= */
 
 function App() {
   /**
+   * 加载用户状态
+   */
+  const { model: savedModel, conversationId: savedConversationId } = loadUserStateFromLocalStorage();
+
+  /**
    * 当前选中的模型
    */
-  const [model, setModel] = useState<ModelType>("openai");
+  const [model, setModel] = useState<ModelType>(savedModel);
 
   /**
    * 所有模型的全部对话
@@ -114,7 +134,7 @@ function App() {
    * 当前选中的对话 ID
    */
   const [currentConversationId, setCurrentConversationId] =
-    useState<string | null>(null);
+    useState<string | null>(savedConversationId);
 
   /**
    * 输入框中的文本
@@ -144,6 +164,13 @@ function App() {
   useEffect(() => {
     saveConversationsToLocalStorage(conversations);
   }, [conversations]);
+
+  /**
+   * 监听模型和对话 ID 的变化，保存到 localStorage
+   */
+  useEffect(() => {
+    saveUserStateToLocalStorage(model, currentConversationId);
+  }, [model, currentConversationId]);
 
   /* =========================
      四、对话管理
@@ -376,14 +403,13 @@ function App() {
           <div className="chat-box">
             {currentConversation ? (
               currentConversation.messages.map((msg, i) => (
-                <div key={i} className="chat-line">
-                  <strong>
-                    {msg.role === "user"
-                      ? "用户"
-                      : "AI"}
-                    ：
-                  </strong>
-                  <span>{msg.content}</span>
+                <div
+                  key={i}
+                  className={`chat-line ${msg.role === "user" ? "chat-user" : "chat-ai"}`}
+                >
+                  <div className="chat-bubble">
+                    {msg.content}
+                  </div>
                 </div>
               ))
             ) : (
@@ -393,11 +419,14 @@ function App() {
             )}
 
             {loading && (
-              <div className="chat-line">
-                <strong>AI：</strong> 思考中…
+              <div className="chat-line chat-ai">
+                <div className="chat-bubble">
+                  思考中…
+                </div>
               </div>
             )}
           </div>
+
         </div>
       </div>
 
