@@ -1,212 +1,363 @@
+/**
+ * React 基础 Hook
+ * useState：用于组件内部状态
+ * useEffect：用于副作用（这里用来做本地存储同步）
+ */
 import { useState, useEffect } from "react";
+
+/**
+ * Tauri 前端调用 Rust 后端命令的核心方法
+ * invoke("命令名", 参数)
+ */
 import { invoke } from "@tauri-apps/api/core";
+
+/**
+ * react-router 的跳转组件
+ * 用于跳转到设置页
+ */
 import { Link } from "react-router-dom";
+
+/**
+ * 当前页面的样式文件
+ * 所有样式都集中在这里，组件中不再出现 style={}
+ */
 import "./styles/App.css";
 
+/* =========================
+   一、类型定义（TypeScript 的“契约”）
+   ========================= */
 
-
-// 定义支持的模型类型
-// "openai" 表示 OpenAI 的 GPT 模型
-// "deepseek" 表示 DeepSeek 模型
-// "qwen" 表示通义千问模型
-// "mimo" 表示小米 MIMO 模型
+/**
+ * 支持的模型类型
+ * 用联合类型可以：
+ * 1. 限制取值范围
+ * 2. 在 switch / if 时获得智能提示
+ */
 type ModelType = "openai" | "deepseek" | "qwen" | "mimo";
 
-// 定义 UI 内部消息结构
-// role: 消息的发送方，"user" 表示用户，"ai" 表示 AI
-// content: 消息的内容
+/**
+ * 单条消息结构
+ * role：消息来源
+ * content：消息文本
+ */
 type Message = {
   role: "user" | "ai";
   content: string;
 };
 
-// 定义对话的结构
+/**
+ * 一个完整对话
+ * id：唯一标识（时间戳）
+ * name：对话显示名称
+ * messages：消息列表
+ */
 type Conversation = {
   id: string;
   name: string;
   messages: Message[];
 };
 
-// 定义保存对话到本地存储的函数
-const saveConversationsToLocalStorage = (conversations: Record<ModelType, Conversation[]>) => {
-  localStorage.setItem("chatConversations", JSON.stringify(conversations));
+/* =========================
+   二、本地存储工具函数
+   ========================= */
+
+/**
+ * 将所有模型的对话数据保存到 localStorage
+ * 使用 Record<ModelType, Conversation[]> 统一结构
+ */
+const saveConversationsToLocalStorage = (
+  conversations: Record<ModelType, Conversation[]>
+) => {
+  localStorage.setItem(
+    "chatConversations",
+    JSON.stringify(conversations)
+  );
 };
 
-// 定义从本地存储加载对话的函数
-const loadConversationsFromLocalStorage = (): Record<ModelType, Conversation[]> => {
-  const savedConversations = localStorage.getItem("chatConversations");
-  return savedConversations ? JSON.parse(savedConversations) : { openai: [], deepseek: [], qwen: [], mimo: [] };
-};
+/**
+ * 从 localStorage 中加载对话数据
+ * 如果没有存过数据，则返回一个“完整但为空”的默认结构
+ */
+const loadConversationsFromLocalStorage =
+  (): Record<ModelType, Conversation[]> => {
+    const saved = localStorage.getItem("chatConversations");
+
+    return saved
+      ? JSON.parse(saved)
+      : {
+        openai: [],
+        deepseek: [],
+        qwen: [],
+        mimo: [],
+      };
+  };
+
+/* =========================
+   三、主组件
+   ========================= */
 
 function App() {
+  /**
+   * 当前选中的模型
+   */
   const [model, setModel] = useState<ModelType>("openai");
-  const [conversations, setConversations] = useState<Record<ModelType, Conversation[]>>(loadConversationsFromLocalStorage);
-  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+
+  /**
+   * 所有模型的全部对话
+   * 结构：{ openai: [...], deepseek: [...] }
+   */
+  const [conversations, setConversations] = useState<
+    Record<ModelType, Conversation[]>
+  >(loadConversationsFromLocalStorage);
+
+  /**
+   * 当前选中的对话 ID
+   */
+  const [currentConversationId, setCurrentConversationId] =
+    useState<string | null>(null);
+
+  /**
+   * 输入框中的文本
+   */
   const [input, setInput] = useState("");
+
+  /**
+   * 是否正在等待 AI 回复
+   * 用于禁用按钮、显示“思考中…”
+   */
   const [loading, setLoading] = useState(false);
 
+  /**
+   * 根据当前模型 + 对话 ID
+   * 动态算出“当前正在聊天的对话”
+   */
   const currentConversation = currentConversationId
-    ? conversations[model].find((conv) => conv.id === currentConversationId)
+    ? conversations[model].find(
+      (c) => c.id === currentConversationId
+    )
     : null;
 
+  /**
+   * 只要 conversations 发生变化
+   * 就自动同步到 localStorage
+   */
   useEffect(() => {
     saveConversationsToLocalStorage(conversations);
   }, [conversations]);
 
+  /* =========================
+     四、对话管理
+     ========================= */
+
+  /**
+   * 创建一个新的空对话
+   */
   const createNewConversation = () => {
-    const newConversation: Conversation = {
-      id: Date.now().toString(),
+    const conv: Conversation = {
+      id: Date.now().toString(), // 简单唯一 ID
       name: `新对话 ${conversations[model].length + 1}`,
       messages: [],
     };
+
     setConversations((prev) => ({
       ...prev,
-      [model]: [...prev[model], newConversation],
+      [model]: [...prev[model], conv],
     }));
-    setCurrentConversationId(newConversation.id);
+
+    // 创建完成后立刻切换到新对话
+    setCurrentConversationId(conv.id);
   };
 
-  // 删除对话的函数
+  /**
+   * 删除指定 ID 的对话
+   */
   const deleteConversation = (id: string) => {
-    // 更新对话状态，过滤掉指定 ID 的对话
     setConversations((prev) => ({
       ...prev,
-      [model]: prev[model].filter((conv) => conv.id !== id),
+      [model]: prev[model].filter((c) => c.id !== id),
     }));
-    // 如果当前对话是被删除的对话，则清空当前对话 ID
+
+    // 如果删的是当前对话，则清空选中状态
     if (currentConversationId === id) {
       setCurrentConversationId(null);
     }
   };
 
-  // 重命名对话的函数
-  const renameConversation = (id: string, newName: string) => {
-    // 更新对话状态，将指定 ID 的对话名称更新为新名称
+  /**
+   * 修改对话名称
+   * 直接在列表中输入即可生效
+   */
+  const renameConversation = (id: string, name: string) => {
     setConversations((prev) => ({
       ...prev,
-      [model]: prev[model].map((conv) =>
-        conv.id === id ? { ...conv, name: newName } : conv
+      [model]: prev[model].map((c) =>
+        c.id === id ? { ...c, name } : c
       ),
     }));
   };
 
-  // 发送消息的函数
+  /* =========================
+     五、发送消息
+     ========================= */
+
   const sendMessage = async () => {
-    // 如果输入为空、正在加载或当前没有选中对话，则直接返回
+    /**
+     * 防御性判断：
+     * - 输入为空
+     * - 正在请求中
+     * - 没有选中对话
+     */
     if (!input.trim() || loading || !currentConversation) return;
 
-    // 创建用户消息对象
-    const userMsg: Message = { role: "user", content: input };
-    // 将用户消息添加到当前对话的消息列表中
-    const updatedMessages = [...currentConversation.messages, userMsg];
+    // 构造用户消息
+    const userMsg: Message = {
+      role: "user",
+      content: input,
+    };
 
-    // 更新对话状态，添加用户消息
+    // 新的消息列表（用户消息先入）
+    const updatedMessages = [
+      ...currentConversation.messages,
+      userMsg,
+    ];
+
+    // 立即更新 UI（先显示用户消息）
     setConversations((prev) => ({
       ...prev,
-      [model]: prev[model].map((conv) =>
-        conv.id === currentConversation.id
-          ? { ...conv, messages: updatedMessages }
-          : conv
+      [model]: prev[model].map((c) =>
+        c.id === currentConversation.id
+          ? { ...c, messages: updatedMessages }
+          : c
       ),
     }));
-    // 清空输入框内容
+
     setInput("");
-    // 设置加载状态为 true
     setLoading(true);
 
     try {
-      // 将消息转换为 API 所需的格式
+      /**
+       * 将内部 Message 转成 AI API 标准格式
+       */
       const apiMessages = updatedMessages.map((m) => ({
         role: m.role === "ai" ? "assistant" : "user",
         content: m.content,
       }));
 
-      // 调用后端接口获取 AI 回复
-      const aiReply = await invoke<string>("chat_with_ai", {
+      /**
+       * 调用 Tauri 后端 Rust 方法
+       */
+      const reply = await invoke<string>("chat_with_ai", {
         model,
         messages: apiMessages,
       });
 
-      // 创建 AI 消息对象
-      const aiMsg: Message = { role: "ai", content: aiReply };
-      // 更新对话状态，添加 AI 消息
+      // 将 AI 回复加入对话
       setConversations((prev) => ({
         ...prev,
-        [model]: prev[model].map((conv) =>
-          conv.id === currentConversation.id
-            ? { ...conv, messages: [...updatedMessages, aiMsg] }
-            : conv
+        [model]: prev[model].map((c) =>
+          c.id === currentConversation.id
+            ? {
+              ...c,
+              messages: [
+                ...updatedMessages,
+                { role: "ai", content: reply },
+              ],
+            }
+            : c
         ),
       }));
     } catch (e: any) {
-      // 如果调用失败，生成错误消息
-      const errMsg =
-        typeof e === "string" ? e : e?.toString?.() || JSON.stringify(e);
+      /**
+       * 捕获错误并显示在聊天窗口中
+       * 这是桌面应用里非常友好的做法
+       */
       setConversations((prev) => ({
         ...prev,
-        [model]: prev[model].map((conv) =>
-          conv.id === currentConversation.id
+        [model]: prev[model].map((c) =>
+          c.id === currentConversation.id
             ? {
-                ...conv,
-                messages: [...updatedMessages, { role: "ai", content: `❌ 调用失败：\n${errMsg}` }],
-              }
-            : conv
+              ...c,
+              messages: [
+                ...updatedMessages,
+                {
+                  role: "ai",
+                  content: `❌ 调用失败：\n${String(e)}`,
+                },
+              ],
+            }
+            : c
         ),
       }));
     } finally {
-      // 无论成功与否，最后将加载状态设置为 false
       setLoading(false);
     }
   };
 
-  return (
-    <div style={{ padding: 20, fontFamily: "sans-serif", maxWidth: 800 }}>
-      <h2>🧠 AI 对话</h2>
+  /* =========================
+     六、UI 渲染
+     ========================= */
 
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+  return (
+    <div className="main-container">
+      {/* 顶部工具栏 */}
+      <div className="nav-container">
+        <h2>🧠 AI 对话</h2>
+
         <select
+          className="model-select"
           value={model}
-          onChange={(e) => setModel(e.target.value as ModelType)}
-          style={{ marginRight: 10 }}
+          onChange={(e) =>
+            setModel(e.target.value as ModelType)
+          }
         >
           <option value="openai">OpenAI (GPT)</option>
           <option value="deepseek">DeepSeek</option>
           <option value="qwen">通义千问</option>
           <option value="mimo">小米 MIMO</option>
         </select>
-        <button onClick={createNewConversation}>新建对话</button>
+
+        <button onClick={createNewConversation}>
+          新建对话
+        </button>
+
         <Link to="/settings">
           <button>设置</button>
         </Link>
       </div>
 
-      <div style={{ display: "flex", marginBottom: 10 }}>
-        <div style={{ flex: 1, marginRight: 10 }}>
+      {/* 主体区域 */}
+      <div className="content-layout">
+        {/* 左侧对话列表 */}
+        <div className="conversation-list">
           <h3>对话列表</h3>
-          <ul style={{ listStyle: "none", padding: 0 }}>
+          <ul>
             {conversations[model].map((conv) => (
               <li
                 key={conv.id}
-                style={{
-                  padding: 10,
-                  border: "1px solid #ccc",
-                  marginBottom: 5,
-                  background: conv.id === currentConversationId ? "#e6f7ff" : "#fff",
-                  cursor: "pointer",
-                }}
-                onClick={() => setCurrentConversationId(conv.id)}
+                className={`conversation-item ${conv.id === currentConversationId
+                    ? "active"
+                    : ""
+                  }`}
+                onClick={() =>
+                  setCurrentConversationId(conv.id)
+                }
               >
                 <input
+                  className="conversation-name"
                   value={conv.name}
-                  onChange={(e) => renameConversation(conv.id, e.target.value)}
-                  style={{ border: "none", background: "transparent", width: "80%" }}
+                  onChange={(e) =>
+                    renameConversation(
+                      conv.id,
+                      e.target.value
+                    )
+                  }
                 />
                 <button
+                  className="btn-delete"
                   onClick={(e) => {
                     e.stopPropagation();
                     deleteConversation(conv.id);
                   }}
-                  style={{ marginLeft: 10 }}
                 >
                   删除
                 </button>
@@ -215,29 +366,31 @@ function App() {
           </ul>
         </div>
 
-        <div style={{ flex: 2 }}>
+        {/* 右侧聊天区域 */}
+        <div className="chat-panel">
           <h3>对话内容</h3>
-          <div
-            style={{
-              border: "1px solid #ccc",
-              height: 360,
-              padding: 10,
-              overflowY: "auto",
-              background: "#fafafa",
-            }}
-          >
+
+          <div className="chat-box">
             {currentConversation ? (
               currentConversation.messages.map((msg, i) => (
-                <div key={i} style={{ marginBottom: 8 }}>
-                  <strong>{msg.role === "user" ? "用户" : "AI"}：</strong>
-                  <span style={{ marginLeft: 4 }}>{msg.content}</span>
+                <div key={i} className="chat-line">
+                  <strong>
+                    {msg.role === "user"
+                      ? "用户"
+                      : "AI"}
+                    ：
+                  </strong>
+                  <span>{msg.content}</span>
                 </div>
               ))
             ) : (
-              <div>请选择一个对话</div>
+              <div className="chat-empty">
+                请选择一个对话
+              </div>
             )}
+
             {loading && (
-              <div>
+              <div className="chat-line">
                 <strong>AI：</strong> 思考中…
               </div>
             )}
@@ -245,18 +398,26 @@ function App() {
         </div>
       </div>
 
-      <div>
+      {/* 输入区域 */}
+      <div className="input-area">
         <input
           className="input-box"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) =>
+            setInput(e.target.value)
+          }
           placeholder="输入内容..."
           disabled={loading || !currentConversation}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") sendMessage();
-          }}
+          onKeyDown={(e) =>
+            e.key === "Enter" && sendMessage()
+          }
         />
-        <button className="btn-send" onClick={sendMessage} disabled={loading || !currentConversation}>
+
+        <button
+          className="btn-send"
+          onClick={sendMessage}
+          disabled={loading || !currentConversation}
+        >
           {loading ? "思考中…" : "发送"}
         </button>
       </div>
