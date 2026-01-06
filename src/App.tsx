@@ -301,24 +301,9 @@ function App() {
     <div className="main-container">
       {/* 顶部工具栏 */}
       <div className="nav-container">
-        <h2>🧠 AI 对话</h2>
+        <h1>🧠 AI 对话</h1>
 
-        <select
-          className="model-select"
-          value={model}
-          onChange={(e) =>
-            setModel(e.target.value as ModelType)
-          }
-        >
-          <option value="openai">OpenAI (GPT)</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="qwen">通义千问</option>
-          <option value="mimo">小米 MIMO</option>
-        </select>
 
-        <button onClick={createNewConversation}>
-          新建对话
-        </button>
 
         <Link to="/settings">
           <button>设置</button>
@@ -329,14 +314,32 @@ function App() {
       <div className="content-layout">
         {/* 左侧对话列表 */}
         <div className="conversation-list">
-          <h3>对话列表</h3>
+          <div>
+            <h3>对话列表</h3>
+            <select
+              className="model-select"
+              value={model}
+              onChange={(e) =>
+                setModel(e.target.value as ModelType)
+              }
+            >
+              <option value="openai">OpenAI (GPT)</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="qwen">通义千问</option>
+              <option value="mimo">小米 MIMO</option>
+            </select>
+
+            <button onClick={createNewConversation}>
+              新建对话
+            </button>
+          </div>
           <ul>
             {conversations[model].map((conv) => (
               <li
                 key={conv.id}
                 className={`conversation-item ${conv.id === currentConversationId
-                    ? "active"
-                    : ""
+                  ? "active"
+                  : ""
                   }`}
                 onClick={() =>
                   setCurrentConversationId(conv.id)
@@ -368,7 +371,7 @@ function App() {
 
         {/* 右侧聊天区域 */}
         <div className="chat-panel">
-          <h3>对话内容</h3>
+          <h2>对话内容</h2>
 
           <div className="chat-box">
             {currentConversation ? (

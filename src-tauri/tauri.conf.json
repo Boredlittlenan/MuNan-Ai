@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "MuNan AI",
-        "width": 800,
-        "height": 600,
+        "width": 950,
+        "height": 560,
         "resizable": true,
         "fullscreen": false,
         "center": true,        

@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import "./styles/Settings.css";
 
 function Settings() {
-  const navigate = useNavigate(); 
+  const navigate = useNavigate();
   const [apiKey, setApiKey] = useState(localStorage.getItem("apiKey") || "");
 
   const saveApiKey = () => {
@@ -17,9 +18,13 @@ function Settings() {
   };
 
   return (
-    <div style={{ padding: 20, fontFamily: "sans-serif", maxWidth: 800 }}>
-      <h2>设置</h2>
-      <div style={{ marginBottom: 20 }}>
+    <div className="main-container">
+      <div className="nav-container">
+        <button onClick={() => navigate("/")}>返回</button> {/* 🔑 v6 用 navigate */}
+        <h2>设置</h2>
+      </div>
+
+      <div className="setting-item">
         <label>
           API Key:
           <input
@@ -28,16 +33,18 @@ function Settings() {
             onChange={(e) => setApiKey(e.target.value)}
             style={{ marginLeft: 10, width: "60%" }}
           />
+          <button onClick={saveApiKey}>
+            保存
+          </button>
+          <button onClick={clearApiKey}>
+            清除
+          </button>
         </label>
+
       </div>
       <div>
-        <button onClick={saveApiKey} style={{ marginRight: 10 }}>
-          保存
-        </button>
-        <button onClick={clearApiKey} style={{ marginRight: 10 }}>
-          清除
-        </button>
-        <button onClick={() => navigate("/")}>返回</button> {/* 🔑 v6 用 navigate */}
+
+
       </div>
     </div>
   );
