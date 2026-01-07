@@ -23,6 +23,8 @@ import { Link } from "react-router-dom";
  */
 import "./styles/App.css";
 
+import { IoSend } from "react-icons/io5";
+
 /* =========================
    一、类型定义（TypeScript 的“契约”）
    ========================= */

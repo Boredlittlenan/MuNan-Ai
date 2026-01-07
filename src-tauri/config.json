@@ -17,6 +17,6 @@
     "qwen": {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
         "api_key": "sk-b14ce46e97ef4897b7aeedf74531348f",
-        "model": "qwen-plus"
+        "model": "qwen3-max"
     }
 }
