@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import "./styles/base.css";
 import "./styles/Settings.css";
 
 function Settings() {

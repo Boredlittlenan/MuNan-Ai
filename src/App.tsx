@@ -21,9 +21,10 @@ import { Link } from "react-router-dom";
  * 当前页面的样式文件
  * 所有样式都集中在这里，组件中不再出现 style={}
  */
+import "./styles/base.css";
 import "./styles/App.css";
 
-import { IoSend } from "react-icons/io5";
+import { IoSettingsSharp } from "react-icons/io5";
 
 /* =========================
    一、类型定义（TypeScript 的“契约”）
@@ -335,8 +336,9 @@ function App() {
 
 
         <Link to="/settings">
-          <button>设置</button>
+          <IoSettingsSharp size={24} color="#4a90e2" />
         </Link>
+
       </div>
 
       {/* 主体区域 */}
