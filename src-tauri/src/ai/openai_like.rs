@@ -44,7 +44,8 @@ pub async fn chat_api(
     let json: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("JSON 解析失败: {}\n原始响应: {}", e, text))?;
 
-    let content = json.get("choices")
+    let content = json
+        .get("choices")
         .and_then(|c| c.get(0))
         .and_then(|m| m.get("message"))
         .and_then(|msg| msg.get("content"))

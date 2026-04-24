@@ -1,187 +1,417 @@
-/* =========================================================
-     三、页面级布局（Layout）
-     ========================================================= */
-
-.main-container {
+.chat-page {
   padding: 16px;
 }
 
-/* 顶部导航栏 */
-.nav-container {
-  display        : flex;
-  align-items    : center;
-  justify-content: space-between;
-  gap            : 10px;
-  margin-bottom  : 12px;
-}
-
-/* 中间左右布局 */
-.content-layout {
-  display      : flex;
+.chat-header {
   margin-bottom: 12px;
 }
 
+.chat-header .page-title {
+  font-size: clamp(23px, 2.7vw, 30px);
+}
 
-/* =========================================================
-     四、对话列表（Conversation List）
-     ========================================================= */
+.chat-header .page-description {
+  margin-top: 6px;
+}
+
+.chat-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  height: calc(100vh - 116px);
+  min-height: 500px;
+}
+
+.chat-sidebar,
+.chat-main {
+  border-radius: var(--radius-xl);
+}
+
+.chat-sidebar {
+  min-height: 0;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.sidebar-section {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-section:last-child {
+  flex: 1;
+  overflow: hidden;
+}
+
+.model-select-section {
+  flex: 0 0 auto;
+}
+
+.model-select-section .section-heading {
+  margin-bottom: 0;
+}
+
+.model-select-label {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.model-select {
+  min-height: var(--control-height);
+  padding: 0 12px;
+  border-radius: 12px;
+  font-weight: 700;
+}
+
+.model-select-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.model-name-badge {
+  max-width: 100%;
+  justify-content: flex-start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px rgba(122, 139, 163, 0.12);
+}
+
+.status-dot.is-ready {
+  background: var(--emerald);
+}
+
+.status-dot.is-missing {
+  background: var(--amber);
+}
 
 .conversation-list {
-  flex        : 1;
-  margin-right: 10px;
-}
-
-.conversation-list>div {
-  height         : 50px;
-  display        : flex;
-  gap            : 10px;
-  align-items    : center;
-  justify-content: space-around;
-}
-
-.conversation-list ul {
   list-style: none;
-  padding   : 0;
-  margin    : 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
-/* 单条对话 */
-.conversation-item {
-  display      : flex;
-  align-items  : center;
-  padding      : 10px;
-  margin-bottom: 6px;
-  border       : 1px solid #ccc;
-  background   : #fff;
-  cursor       : pointer;
-  border-radius: 4px;
+.conversation-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
-.conversation-item.active {
-  background: #e6f7ff;
+.conversation-card:hover {
+  /* transform: translateY(-1px); */
 }
 
-/* 对话名称输入框 */
+.conversation-card.is-active {
+  border-color: rgba(29, 114, 243, 0.24);
+  /* box-shadow: 0 14px 26px rgba(29, 114, 243, 0.12); */
+}
+
+.conversation-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
 .conversation-name {
-  flex      : 1;
-  border    : none;
+  border: none;
+  padding: 0;
   background: transparent;
-  outline   : none;
-  font-size : 14px;
+  font-size: 14px;
+  font-weight: 700;
 }
 
-.btn-delete {
-  margin-left: 8px;
+.chat-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 16px;
+  overflow: hidden;
 }
 
-
-/* =========================================================
-     五、聊天区域（Chat Panel）
-     ========================================================= */
-
-.chat-panel {
-  flex: 2;
-}
-
-.chat-panel h2 {
-  text-align: right;
-}
-
-.chat-box {
-  height       : 360px;
-  padding      : 10px;
-  border       : 1px solid #ccc;
-  background   : #fafafa;
-  overflow-y   : auto;
-  border-radius: 4px;
-}
-
-.chat-line {
-  margin-bottom: 8px;
-  line-height  : 1.5;
-}
-
-.chat-line span {
-  margin-left: 4px;
-}
-
-.chat-empty {
-  color: #888;
-}
-
-/* =========================
-   聊天气泡布局
-   ========================= */
-
-/* 每一行消息 */
-.chat-line {
-  display      : flex;
+.chat-main__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 10px;
 }
 
-/* AI 在左 */
+.chat-main h2 {
+  font-size: 22px;
+}
+
+.chat-main__subtitle {
+  font-size: 13px;
+}
+
+.chat-main__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-main__summary span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--line-soft);
+}
+
+.chat-box {
+  flex: 1;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  scrollbar-gutter: stable;
+}
+
+.chat-line {
+  display: flex;
+  margin-bottom: 10px;
+}
+
 .chat-ai {
   justify-content: flex-start;
 }
 
-/* 用户在右 */
 .chat-user {
   justify-content: flex-end;
 }
 
-/* 气泡本体 */
 .chat-bubble {
-  max-width    : 70%;
-  padding      : 10px 12px;
-  border-radius: 8px;
-  line-height  : 1.5;
-  word-break   : break-word;
-  white-space  : pre-wrap;
-  font-size    : 14px;
+  max-width: min(76%, 780px);
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  font-size: 14px;
 }
 
-/* AI 气泡样式 */
 .chat-ai .chat-bubble {
-  background-color: #e6f7ff;
-  border          : 1px solid #b3e5ff;
-
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(114, 86, 241, 0.1);
 }
 
-/* 用户气泡样式 */
 .chat-user .chat-bubble {
-  background-color: #f9f9f9;
-  border          : 1px solid #ddd;
+  color: #fff;
+  background: #1d72f3;
 }
 
+.chat-role {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
 
+.chat-bubble__topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+}
 
-/* =========================================================
-     六、输入区（Input Area）
-     ========================================================= */
+.chat-message-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chat-message-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 999px;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--line-soft);
+  transition:
+    color 0.18s ease,
+    background-color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.chat-message-action:hover:not(:disabled) {
+  color: var(--sky);
+  background: #fff;
+  border-color: rgba(29, 114, 243, 0.24);
+}
+
+.chat-message-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.chat-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-empty-state {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.chat-empty-state h3 {
+  font-size: 18px;
+}
+
+.chat-empty-state p {
+  font-size: 13px;
+}
+
+.chat-empty-state h3,
+.chat-empty-state p {
+  margin: 0;
+}
+
+.input-panel {
+  margin-top: 10px;
+  flex: 0 0 auto;
+}
+
+.input-caption {
+  margin-bottom: 6px;
+  color: var(--text-3);
+  font-size: 12px;
+}
 
 .input-area {
-  display: flex;
-  gap    : 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px 96px;
+  gap: 8px;
+  align-items: end;
 }
 
 .input-box {
-  flex         : 1;
-  padding      : 8px 10px;
-  border       : 1px solid #ccc;
-  border-radius: 4px;
-  font-size    : 14px;
+  min-height: 64px;
+  max-height: 112px;
+  padding: 10px 12px;
+  overflow-y: auto;
 }
 
+.send-button {
+  min-height: 64px;
+  border-radius: 16px;
+}
 
-/* =========================================================
-     七、（可选）通用容器样式（如设置页）
-     ========================================================= */
+.record-button {
+  width: 48px;
+  min-width: 48px;
+  min-height: 64px;
+  padding: 0;
+  border-radius: 16px;
+}
 
-.container {
-  max-width    : 800px;
-  margin       : 0 auto;
-  padding      : 20px;
-  background   : #fff;
-  box-shadow   : 0 4px 6px rgba(0, 0, 0, 0.1);
-  border-radius: 8px;
+.record-button.is-recording {
+  color: #fff;
+  background: var(--danger);
+  border-color: rgba(214, 66, 82, 0.26);
+}
+
+.chat-box::-webkit-scrollbar,
+.conversation-list::-webkit-scrollbar,
+.input-box::-webkit-scrollbar {
+  width: 10px;
+}
+
+.chat-box::-webkit-scrollbar-track,
+.conversation-list::-webkit-scrollbar-track,
+.input-box::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.46);
+  border-radius: 999px;
+}
+
+.chat-box::-webkit-scrollbar-thumb,
+.conversation-list::-webkit-scrollbar-thumb,
+.input-box::-webkit-scrollbar-thumb {
+  background: rgba(122, 139, 163, 0.46);
+  border: 3px solid rgba(255, 255, 255, 0.46);
+  border-radius: 999px;
+}
+
+@media (max-width: 1100px) {
+  .chat-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+  }
+
+  .chat-main {
+    min-height: 540px;
+  }
+
+  .chat-sidebar {
+    max-height: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .chat-main__header {
+    flex-direction: column;
+  }
+
+  .chat-bubble {
+    max-width: 100%;
+  }
+
+  .input-area {
+    grid-template-columns: 1fr;
+  }
+
+  .record-button,
+  .send-button {
+    width: 100%;
+    min-height: 42px;
+  }
 }

@@ -1,263 +1,420 @@
-/**
- * React 基础 Hook
- * useState：用于组件内部状态
- * useEffect：用于副作用（这里用来做本地存储同步）
- */
-import { useState, useEffect } from "react";
-
-/**
- * Tauri 前端调用 Rust 后端命令的核心方法
- * invoke("命令名", 参数)
- */
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-
-/**
- * react-router 的跳转组件
- * 用于跳转到设置页
- */
 import { Link } from "react-router-dom";
+import {
+  IoAdd,
+  IoChatbubbleEllipses,
+  IoCopyOutline,
+  IoMic,
+  IoSettingsSharp,
+  IoStopCircleOutline,
+  IoVolumeHigh,
+} from "react-icons/io5";
 
-/**
- * 当前页面的样式文件
- * 所有样式都集中在这里，组件中不再出现 style={}
- */
 import "./styles/base.css";
 import "./styles/App.css";
 
-import { IoSettingsSharp } from "react-icons/io5";
+import {
+  type AppConfig,
+  type Conversation,
+  type Message,
+  type ModelType,
+  MODEL_CATALOG,
+  MODEL_META,
+  MODEL_OPTIONS,
+  createEmptyAppConfig,
+  loadConversationsFromStorage,
+  loadUserState,
+  normalizeAppConfig,
+  saveConversationsToStorage,
+  saveUserState,
+  isModelConfigured,
+} from "./modelConfig";
 
-/* =========================
-   一、类型定义（TypeScript 的“契约”）
-   ========================= */
-
-/**
- * 支持的模型类型
- * 用联合类型可以：
- * 1. 限制取值范围
- * 2. 在 switch / if 时获得智能提示
- */
-type ModelType = "openai" | "deepseek" | "qwen" | "mimo";
-
-/**
- * 单条消息结构
- * role：消息来源
- * content：消息文本
- */
-type Message = {
-  role: "user" | "ai";
-  content: string;
+type SynthesizeSpeechResponse = {
+  audio_base64: string;
+  mime_type: string;
 };
 
-/**
- * 一个完整对话
- * id：唯一标识（时间戳）
- * name：对话显示名称
- * messages：消息列表
- */
-type Conversation = {
-  id: string;
-  name: string;
-  messages: Message[];
+type TranscribeAudioResponse = {
+  text: string;
 };
 
-/* =========================
-   二、本地存储工具函数
-   ========================= */
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
 
-/**
- * 将所有模型的对话数据保存到 localStorage
- * 使用 Record<ModelType, Conversation[]> 统一结构
- */
-const saveConversationsToLocalStorage = (
-  conversations: Record<ModelType, Conversation[]>
-) => {
-  localStorage.setItem(
-    "chatConversations",
-    JSON.stringify(conversations)
-  );
+  for (let index = 0; index < bytes.byteLength; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+
+  return window.btoa(binary);
 };
 
-/**
- * 从 localStorage 中加载对话数据
- * 如果没有存过数据，则返回一个“完整但为空”的默认结构
- */
-const loadConversationsFromLocalStorage =
-  (): Record<ModelType, Conversation[]> => {
-    const saved = localStorage.getItem("chatConversations");
+const encodeAudioBufferToWav = (audioBuffer: AudioBuffer): ArrayBuffer => {
+  const numberOfChannels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const bytesPerSample = 2;
+  const blockAlign = numberOfChannels * bytesPerSample;
+  const dataLength = audioBuffer.length * blockAlign;
+  const buffer = new ArrayBuffer(44 + dataLength);
+  const view = new DataView(buffer);
+  let offset = 0;
 
-    return saved
-      ? JSON.parse(saved)
-      : {
-        openai: [],
-        deepseek: [],
-        qwen: [],
-        mimo: [],
-      };
+  const writeString = (value: string) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset, value.charCodeAt(index));
+      offset += 1;
+    }
   };
 
-/**
- * 保存用户状态到 localStorage
- */
-const saveUserStateToLocalStorage = (model: ModelType, conversationId: string | null) => {
-  localStorage.setItem("userState", JSON.stringify({ model, conversationId }));
+  writeString("RIFF");
+  view.setUint32(offset, 36 + dataLength, true);
+  offset += 4;
+  writeString("WAVE");
+  writeString("fmt ");
+  view.setUint32(offset, 16, true);
+  offset += 4;
+  view.setUint16(offset, 1, true);
+  offset += 2;
+  view.setUint16(offset, numberOfChannels, true);
+  offset += 2;
+  view.setUint32(offset, sampleRate, true);
+  offset += 4;
+  view.setUint32(offset, sampleRate * blockAlign, true);
+  offset += 4;
+  view.setUint16(offset, blockAlign, true);
+  offset += 2;
+  view.setUint16(offset, bytesPerSample * 8, true);
+  offset += 2;
+  writeString("data");
+  view.setUint32(offset, dataLength, true);
+  offset += 4;
+
+  for (let sampleIndex = 0; sampleIndex < audioBuffer.length; sampleIndex += 1) {
+    for (let channel = 0; channel < numberOfChannels; channel += 1) {
+      const sample = Math.max(-1, Math.min(1, audioBuffer.getChannelData(channel)[sampleIndex]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += 2;
+    }
+  }
+
+  return buffer;
 };
 
-/**
- * 从 localStorage 加载用户状态
- */
-const loadUserStateFromLocalStorage = (): { model: ModelType; conversationId: string | null } => {
-  const saved = localStorage.getItem("userState");
-  return saved ? JSON.parse(saved) : { model: "openai", conversationId: null };
+const recordedBlobToWavBase64 = async (blob: Blob): Promise<string> => {
+  const AudioContextCtor =
+    window.AudioContext ??
+    (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+
+  if (!AudioContextCtor) {
+    throw new Error("当前 WebView 不支持音频解码。");
+  }
+
+  const audioContext = new AudioContextCtor();
+
+  try {
+    const sourceBuffer = await blob.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(sourceBuffer.slice(0));
+    return arrayBufferToBase64(encodeAudioBufferToWav(audioBuffer));
+  } finally {
+    void audioContext.close();
+  }
 };
 
 /* =========================
-   三、主组件
+   页面职责说明
+   1. 管理聊天首页的模型切换、会话切换和消息发送。
+   2. 把会话历史存进 localStorage，保证刷新后仍能恢复。
+   3. 启动时读取后端配置，用于判断当前模型是否可直接使用。
    ========================= */
 
 function App() {
   /**
-   * 加载用户状态
+   * 初始化时先恢复“上次使用的模型 + 会话”。
+   * 如果用户在设置页改了默认模型，这里也会自动吃到新的默认值。
    */
-  const { model: savedModel, conversationId: savedConversationId } = loadUserStateFromLocalStorage();
+  const initialUserState = loadUserState();
 
   /**
-   * 当前选中的模型
+   * 当前选中的模型。
+   * 聊天页左侧切换模型时，会同步切换该模型下的会话列表。
    */
-  const [model, setModel] = useState<ModelType>(savedModel);
+  const [model, setModel] = useState<ModelType>(initialUserState.model);
 
   /**
-   * 所有模型的全部对话
-   * 结构：{ openai: [...], deepseek: [...] }
+   * 所有模型共用一份会话仓库，结构类似：
+   * {
+   *   openai: [Conversation, ...],
+   *   qwen: [Conversation, ...]
+   * }
    */
-  const [conversations, setConversations] = useState<
-    Record<ModelType, Conversation[]>
-  >(loadConversationsFromLocalStorage);
+  const [conversations, setConversations] = useState(loadConversationsFromStorage);
 
   /**
-   * 当前选中的对话 ID
+   * 当前正在查看的会话 ID。
+   * 这里不直接存整个对象，避免状态嵌套过深导致更新不一致。
    */
-  const [currentConversationId, setCurrentConversationId] =
-    useState<string | null>(savedConversationId);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(
+    initialUserState.conversationId
+  );
 
   /**
-   * 输入框中的文本
+   * 输入框内容与发送状态。
+   * loading 为 true 时会禁用输入，避免重复提交。
    */
   const [input, setInput] = useState("");
-
-  /**
-   * 是否正在等待 AI 回复
-   * 用于禁用按钮、显示“思考中…”
-   */
   const [loading, setLoading] = useState(false);
 
   /**
-   * 根据当前模型 + 对话 ID
-   * 动态算出“当前正在聊天的对话”
+   * 后端模型配置。
+   * 这里会从 Rust 侧读 config.json，决定某个模型是否已经配置完成。
    */
-  const currentConversation = currentConversationId
-    ? conversations[model].find(
-      (c) => c.id === currentConversationId
-    )
-    : null;
+  const [appConfig, setAppConfig] = useState<AppConfig>(createEmptyAppConfig);
+  const [configStatus, setConfigStatus] = useState<"idle" | "loading" | "ready" | "error">(
+    "idle"
+  );
+  const [configError, setConfigError] = useState("");
+  const [speechError, setSpeechError] = useState("");
+  const [speakingMessageKey, setSpeakingMessageKey] = useState<string | null>(null);
+  const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
+  const [recordingState, setRecordingState] = useState<"idle" | "recording" | "transcribing">(
+    "idle"
+  );
 
   /**
-   * 只要 conversations 发生变化
-   * 就自动同步到 localStorage
+   * 聊天区底部锚点，用于每次发送和收到消息后自动滚动到底部。
+   */
+  const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+
+  /**
+   * 当前模型下的所有会话，以及当前真正选中的会话对象。
+   * 用 useMemo 做一次派生，避免 JSX 里反复写查找逻辑。
+   */
+  const currentModelConversations = useMemo(
+    () => conversations[model],
+    [conversations, model]
+  );
+
+  const currentConversation = useMemo(
+    () =>
+      currentConversationId
+        ? currentModelConversations.find((conversation) => conversation.id === currentConversationId) ??
+          null
+        : null,
+    [currentConversationId, currentModelConversations]
+  );
+
+  const providerModelChoices = useMemo(() => {
+    const builtInModels = MODEL_CATALOG[model] ?? [];
+    const customModels = appConfig.custom_models?.[model] ?? [];
+    const currentModelName = appConfig[model]?.model ?? "";
+
+    return Array.from(new Set([...builtInModels, ...customModels, currentModelName].filter(Boolean)));
+  }, [appConfig, model]);
+
+  const ttsReady = useMemo(() => {
+    const tts = appConfig.speech.tts;
+    const needsVoiceDescription = tts.model.includes("voicedesign");
+
+    return Boolean(
+      tts.base_url.trim() &&
+        tts.api_key.trim() &&
+        tts.model.trim() &&
+        (!needsVoiceDescription || tts.voice_description.trim())
+    );
+  }, [appConfig.speech.tts]);
+
+  const asrReady = useMemo(() => {
+    const asr = appConfig.speech.asr;
+
+    if (asr.provider === "tencent") {
+      return Boolean(
+        asr.app_id.trim() &&
+          asr.secret_id.trim() &&
+          asr.secret_key.trim() &&
+          asr.tencent_engine_type.trim()
+      );
+    }
+
+    return Boolean(asr.base_url.trim() && asr.api_key.trim() && asr.model.trim());
+  }, [appConfig.speech.asr]);
+
+  /**
+   * 页面挂载后读取后端配置。
+   * 如果配置还没准备好，聊天页会明确提示，而不是让用户点了发送才发现报错。
    */
   useEffect(() => {
-    saveConversationsToLocalStorage(conversations);
+    const loadConfig = async () => {
+      setConfigStatus("loading");
+      setConfigError("");
+
+      try {
+        const config = await invoke<AppConfig>("load_app_config");
+        setAppConfig(normalizeAppConfig(config));
+        setConfigStatus("ready");
+      } catch (error) {
+        setConfigStatus("error");
+        setConfigError(String(error));
+      }
+    };
+
+    void loadConfig();
+  }, []);
+
+  /**
+   * 会话仓库只要变化，就立即持久化。
+   * 这样关闭应用、刷新页面或切换路由后都能恢复聊天上下文。
+   */
+  useEffect(() => {
+    saveConversationsToStorage(conversations);
   }, [conversations]);
 
   /**
-   * 监听模型和对话 ID 的变化，保存到 localStorage
+   * 记录“当前模型 + 当前会话”。
+   * 设置页切回聊天页后，也能继续停留在用户刚刚使用的位置。
    */
   useEffect(() => {
-    saveUserStateToLocalStorage(model, currentConversationId);
+    saveUserState(model, currentConversationId);
   }, [model, currentConversationId]);
 
-  /* =========================
-     四、对话管理
-     ========================= */
+  /**
+   * 当用户切换模型时，检查当前会话 ID 是否仍然有效。
+   * 这是之前容易出问题的地方：旧模型的会话 ID 在新模型里不存在，会导致右侧空白。
+   */
+  useEffect(() => {
+    const hasCurrentConversation = currentModelConversations.some(
+      (conversation) => conversation.id === currentConversationId
+    );
+
+    if (!hasCurrentConversation) {
+      setCurrentConversationId(currentModelConversations[0]?.id ?? null);
+    }
+  }, [currentConversationId, currentModelConversations]);
 
   /**
-   * 创建一个新的空对话
+   * 新消息加入后自动滚动到底部，保证桌面端长对话体验更顺手。
    */
-  const createNewConversation = () => {
-    const conv: Conversation = {
-      id: Date.now().toString(), // 简单唯一 ID
-      name: `新对话 ${conversations[model].length + 1}`,
-      messages: [],
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [currentConversation?.messages.length, loading]);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      mediaRecorderRef.current?.stop();
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  /**
+   * 当前模型是否已经配置可用。
+   * 只要 base_url、api_key 和 model 名称任意一个为空，就视为未完成配置。
+   */
+  const currentModelReady = isModelConfigured(appConfig, model);
+
+  const switchProviderModel = async (modelName: string) => {
+    const nextConfig: AppConfig = {
+      ...appConfig,
+      [model]: {
+        ...appConfig[model],
+        model: modelName,
+      },
     };
 
-    setConversations((prev) => ({
-      ...prev,
-      [model]: [...prev[model], conv],
-    }));
+    setAppConfig(nextConfig);
+    setConfigError("");
 
-    // 创建完成后立刻切换到新对话
-    setCurrentConversationId(conv.id);
-  };
-
-  /**
-   * 删除指定 ID 的对话
-   */
-  const deleteConversation = (id: string) => {
-    setConversations((prev) => ({
-      ...prev,
-      [model]: prev[model].filter((c) => c.id !== id),
-    }));
-
-    // 如果删的是当前对话，则清空选中状态
-    if (currentConversationId === id) {
-      setCurrentConversationId(null);
+    try {
+      await invoke("save_app_config", { config: nextConfig });
+    } catch (error) {
+      setConfigError(`模型切换保存失败：${String(error)}`);
     }
   };
 
   /**
-   * 修改对话名称
-   * 直接在列表中输入即可生效
+   * 新建会话时使用模型名做前缀，方便用户在多模型场景下快速区分用途。
    */
-  const renameConversation = (id: string, name: string) => {
-    setConversations((prev) => ({
-      ...prev,
-      [model]: prev[model].map((c) =>
-        c.id === id ? { ...c, name } : c
+  const createNewConversation = () => {
+    const nextConversation: Conversation = {
+      id: `${model}-${Date.now()}`,
+      name: `${MODEL_META[model].label} 会话 ${currentModelConversations.length + 1}`,
+      messages: [],
+    };
+
+    setConversations((previous) => ({
+      ...previous,
+      [model]: [nextConversation, ...previous[model]],
+    }));
+    setCurrentConversationId(nextConversation.id);
+  };
+
+  /**
+   * 删除会话后，如果删掉的正好是当前会话，就回退到同模型下第一条会话。
+   */
+  const deleteConversation = (conversationId: string) => {
+    const nextConversations = currentModelConversations.filter(
+      (conversation) => conversation.id !== conversationId
+    );
+
+    setConversations((previous) => ({
+      ...previous,
+      [model]: nextConversations,
+    }));
+
+    if (currentConversationId === conversationId) {
+      setCurrentConversationId(nextConversations[0]?.id ?? null);
+    }
+  };
+
+  /**
+   * 会话名称支持就地编辑。
+   * 为了避免误清空，这里对纯空白做了 trim 校验，空值时回退到原名称。
+   */
+  const renameConversation = (conversationId: string, name: string) => {
+    setConversations((previous) => ({
+      ...previous,
+      [model]: previous[model].map((conversation) =>
+        conversation.id === conversationId
+          ? {
+              ...conversation,
+              name: name.trimStart(),
+            }
+          : conversation
       ),
     }));
   };
 
-  /* =========================
-     五、发送消息
-     ========================= */
-
+  /**
+   * 输入发送的核心逻辑：
+   * 1. 先把用户消息写进本地 UI，保证页面即时反馈。
+   * 2. 再把标准化后的 messages 传给 Rust 后端。
+   * 3. 成功时写入 AI 回复，失败时写入错误提示气泡。
+   */
   const sendMessage = async () => {
-    /**
-     * 防御性判断：
-     * - 输入为空
-     * - 正在请求中
-     * - 没有选中对话
-     */
-    if (!input.trim() || loading || !currentConversation) return;
+    if (!input.trim() || loading || !currentConversation || !currentModelReady) {
+      return;
+    }
 
-    // 构造用户消息
-    const userMsg: Message = {
+    const userMessage: Message = {
       role: "user",
-      content: input,
+      content: input.trim(),
     };
 
-    // 新的消息列表（用户消息先入）
-    const updatedMessages = [
-      ...currentConversation.messages,
-      userMsg,
-    ];
+    const optimisticMessages = [...currentConversation.messages, userMessage];
 
-    // 立即更新 UI（先显示用户消息）
-    setConversations((prev) => ({
-      ...prev,
-      [model]: prev[model].map((c) =>
-        c.id === currentConversation.id
-          ? { ...c, messages: updatedMessages }
-          : c
+    setConversations((previous) => ({
+      ...previous,
+      [model]: previous[model].map((conversation) =>
+        conversation.id === currentConversation.id
+          ? { ...conversation, messages: optimisticMessages }
+          : conversation
       ),
     }));
 
@@ -265,57 +422,43 @@ function App() {
     setLoading(true);
 
     try {
-      /**
-       * 将内部 Message 转成 AI API 标准格式
-       */
-      const apiMessages = updatedMessages.map((m) => ({
-        role: m.role === "ai" ? "assistant" : "user",
-        content: m.content,
+      const apiMessages = optimisticMessages.map((message) => ({
+        role: message.role === "ai" ? "assistant" : "user",
+        content: message.content,
       }));
 
-      /**
-       * 调用 Tauri 后端 Rust 方法
-       */
       const reply = await invoke<string>("chat_with_ai", {
         model,
         messages: apiMessages,
       });
 
-      // 将 AI 回复加入对话
-      setConversations((prev) => ({
-        ...prev,
-        [model]: prev[model].map((c) =>
-          c.id === currentConversation.id
+      setConversations((previous) => ({
+        ...previous,
+        [model]: previous[model].map((conversation) =>
+          conversation.id === currentConversation.id
             ? {
-              ...c,
-              messages: [
-                ...updatedMessages,
-                { role: "ai", content: reply },
-              ],
-            }
-            : c
+                ...conversation,
+                messages: [...optimisticMessages, { role: "ai", content: reply }],
+              }
+            : conversation
         ),
       }));
-    } catch (e: any) {
-      /**
-       * 捕获错误并显示在聊天窗口中
-       * 这是桌面应用里非常友好的做法
-       */
-      setConversations((prev) => ({
-        ...prev,
-        [model]: prev[model].map((c) =>
-          c.id === currentConversation.id
+    } catch (error) {
+      setConversations((previous) => ({
+        ...previous,
+        [model]: previous[model].map((conversation) =>
+          conversation.id === currentConversation.id
             ? {
-              ...c,
-              messages: [
-                ...updatedMessages,
-                {
-                  role: "ai",
-                  content: `❌ 调用失败：\n${String(e)}`,
-                },
-              ],
-            }
-            : c
+                ...conversation,
+                messages: [
+                  ...optimisticMessages,
+                  {
+                    role: "ai",
+                    content: `请求失败，请检查模型配置或网络状态。\n${String(error)}`,
+                  },
+                ],
+              }
+            : conversation
         ),
       }));
     } finally {
@@ -323,139 +466,488 @@ function App() {
     }
   };
 
-  /* =========================
-     六、UI 渲染
-     ========================= */
+  const copyReply = async (content: string, messageKey: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageKey(messageKey);
+      window.setTimeout(() => {
+        setCopiedMessageKey((current) => (current === messageKey ? null : current));
+      }, 1200);
+    } catch (error) {
+      setSpeechError(`复制失败：${String(error)}`);
+    }
+  };
+
+  const stopSpeech = () => {
+    audioRef.current?.pause();
+    audioRef.current = null;
+    setSpeakingMessageKey(null);
+  };
+
+  const speakReply = async (content: string, messageKey: string) => {
+    if (speakingMessageKey === messageKey) {
+      stopSpeech();
+      return;
+    }
+
+    if (!ttsReady) {
+      setSpeechError(
+        "TTS 配置不完整。mimo-v2.5-tts-voicedesign 还需要在设置页填写音色描述。"
+      );
+      return;
+    }
+
+    stopSpeech();
+    setSpeechError("");
+    setSpeakingMessageKey(messageKey);
+
+    try {
+      const audio = await invoke<SynthesizeSpeechResponse>("synthesize_speech", {
+        request: {
+          text: content,
+          format: "wav",
+        },
+      });
+      const player = new Audio(`data:${audio.mime_type};base64,${audio.audio_base64}`);
+
+      audioRef.current = player;
+      player.onended = () => setSpeakingMessageKey(null);
+      player.onerror = () => {
+        setSpeakingMessageKey(null);
+        setSpeechError("语音播放失败，请检查返回的音频格式。");
+      };
+
+      await player.play();
+    } catch (error) {
+      setSpeakingMessageKey(null);
+      setSpeechError(`语音朗读失败：${String(error)}`);
+    }
+  };
+
+  const cleanupRecording = () => {
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    recordingStreamRef.current = null;
+    mediaRecorderRef.current = null;
+    recordingChunksRef.current = [];
+  };
+
+  const finishRecording = async (blob: Blob) => {
+    setRecordingState("transcribing");
+
+    try {
+      if (blob.size === 0) {
+        throw new Error("没有采集到有效音频。");
+      }
+
+      const audioBase64 = await recordedBlobToWavBase64(blob);
+      const result = await invoke<TranscribeAudioResponse>("transcribe_audio", {
+        request: {
+          audio_base64: audioBase64,
+          mime_type: "audio/wav",
+        },
+      });
+      const text = result.text.trim();
+
+      if (!text) {
+        throw new Error("没有识别到可用文本。");
+      }
+
+      setInput((current) => {
+        const separator = current.trim() ? "\n" : "";
+        return `${current}${separator}${text}`;
+      });
+      setSpeechError("");
+    } catch (error) {
+      setSpeechError(`语音输入失败：${String(error)}`);
+    } finally {
+      cleanupRecording();
+      setRecordingState("idle");
+    }
+  };
+
+  const startRecording = async () => {
+    if (!asrReady) {
+      setSpeechError("ASR 配置不完整，请先在设置页补全当前识别服务所需字段。");
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setSpeechError("当前环境不支持麦克风录音。");
+      return;
+    }
+
+    try {
+      setSpeechError("");
+      stopSpeech();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const preferredTypes = [
+        "audio/webm;codecs=opus",
+        "audio/ogg;codecs=opus",
+        "audio/webm",
+        "audio/ogg",
+      ];
+      const mimeType = preferredTypes.find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+
+      recordingStreamRef.current = stream;
+      recordingChunksRef.current = [];
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onerror = () => {
+        setSpeechError("录音失败，请检查麦克风权限。");
+        cleanupRecording();
+        setRecordingState("idle");
+      };
+      recorder.onstop = () => {
+        const recordedBlob = new Blob(recordingChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+        void finishRecording(recordedBlob);
+      };
+
+      recorder.start();
+      setRecordingState("recording");
+    } catch (error) {
+      cleanupRecording();
+      setRecordingState("idle");
+      setSpeechError(`无法启动麦克风：${String(error)}`);
+    }
+  };
+
+  const toggleRecording = () => {
+    if (recordingState === "recording") {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+
+    if (recordingState === "idle") {
+      void startRecording();
+    }
+  };
 
   return (
-    <div className="main-container">
-      {/* 顶部工具栏 */}
-      <div className="nav-container">
-        <h1>🧠 AI 对话</h1>
-
-
-
-        <Link to="/settings">
-          <IoSettingsSharp size={24} color="#4a90e2" />
-        </Link>
-
-      </div>
-
-      {/* 主体区域 */}
-      <div className="content-layout">
-        {/* 左侧对话列表 */}
-        <div className="conversation-list">
-          <div>
-            <h3>对话列表</h3>
-            <select
-              className="model-select"
-              value={model}
-              onChange={(e) =>
-                setModel(e.target.value as ModelType)
-              }
-            >
-              <option value="openai">OpenAI (GPT)</option>
-              <option value="deepseek">DeepSeek</option>
-              <option value="qwen">通义千问</option>
-              <option value="mimo">小米 MIMO</option>
-            </select>
-
-            <button onClick={createNewConversation}>
-              新建对话
-            </button>
-          </div>
-          <ul>
-            {conversations[model].map((conv) => (
-              <li
-                key={conv.id}
-                className={`conversation-item ${conv.id === currentConversationId
-                  ? "active"
-                  : ""
-                  }`}
-                onClick={() =>
-                  setCurrentConversationId(conv.id)
-                }
-              >
-                <input
-                  className="conversation-name"
-                  value={conv.name}
-                  onChange={(e) =>
-                    renameConversation(
-                      conv.id,
-                      e.target.value
-                    )
-                  }
-                />
-                <button
-                  className="btn-delete"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteConversation(conv.id);
-                  }}
-                >
-                  删除
-                </button>
-              </li>
-            ))}
-          </ul>
+    <div className="page-shell chat-page">
+      {/* 顶部导航区：负责品牌展示、状态说明和进入设置页。 */}
+      <header className="page-header chat-header">
+        <div>
+          <p className="page-eyebrow">MuNan AI Desktop</p>
+          <h1 className="page-title">多模型对话工作台</h1>
+          <p className="page-description">
+            左侧管理会话，右侧专注聊天，设置页统一维护每个模型的接口与密钥。
+          </p>
         </div>
 
-        {/* 右侧聊天区域 */}
-        <div className="chat-panel">
-          <h2>对话内容</h2>
+        <div className="header-actions">
+          <div className={`status-chip ${currentModelReady ? "is-ready" : "is-warning"}`}>
+            {currentModelReady ? "当前模型已就绪" : "当前模型待配置"}
+          </div>
+
+          <Link className="icon-action" to="/settings" aria-label="打开设置页">
+            <IoSettingsSharp size={20} />
+          </Link>
+        </div>
+      </header>
+
+      {/* 页面主区域：左侧为模型和会话，右侧为聊天内容。 */}
+      <div className="chat-layout">
+        <aside className="chat-sidebar glass-panel">
+          <section className="sidebar-section model-select-section">
+            <div className="section-heading">
+              <div>
+                <p className="section-kicker">模型切换</p>
+                <h2>选择工作模型</h2>
+              </div>
+            </div>
+
+            <label className="model-select-label" htmlFor="chat-provider-select">
+              模型列表
+            </label>
+            <select
+              id="chat-provider-select"
+              className="model-select"
+              value={model}
+              onChange={(event) => setModel(event.target.value as ModelType)}
+            >
+              {MODEL_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {MODEL_META[option.id].label} - {MODEL_META[option.id].provider}
+                </option>
+              ))}
+            </select>
+
+            <label className="model-select-label" htmlFor="chat-provider-model-select">
+              供应商模型
+            </label>
+            <select
+              id="chat-provider-model-select"
+              className="model-select"
+              value={appConfig[model]?.model ?? ""}
+              disabled={providerModelChoices.length === 0}
+              onChange={(event) => void switchProviderModel(event.target.value)}
+            >
+              <option value="">请选择模型</option>
+              {providerModelChoices.map((modelName) => (
+                <option key={modelName} value={modelName}>
+                  {modelName}
+                </option>
+              ))}
+            </select>
+
+            <div className="model-select-summary">
+              <span className="section-badge">{MODEL_META[model].provider}</span>
+              {appConfig[model]?.model && (
+                <span className="section-badge model-name-badge">{appConfig[model].model}</span>
+              )}
+              <span className={`status-dot ${currentModelReady ? "is-ready" : "is-missing"}`} />
+            </div>
+          </section>
+
+          <section className="sidebar-section">
+            <div className="section-heading">
+              <div>
+                <p className="section-kicker">会话管理</p>
+                <h2>{MODEL_META[model].label} 会话列表</h2>
+              </div>
+
+              <button type="button" className="primary-button" onClick={createNewConversation}>
+                <IoAdd size={18} />
+                新建会话
+              </button>
+            </div>
+
+            {currentModelConversations.length > 0 ? (
+              <ul className="conversation-list">
+                {currentModelConversations.map((conversation) => (
+                  <li
+                    key={conversation.id}
+                    className={`conversation-card ${
+                      conversation.id === currentConversationId ? "is-active" : ""
+                    }`}
+                    onClick={() => setCurrentConversationId(conversation.id)}
+                  >
+                    <div className="conversation-card__header">
+                      <IoChatbubbleEllipses size={16} />
+                      <span>{conversation.messages.length} 条消息</span>
+                    </div>
+
+                    <input
+                      className="conversation-name"
+                      value={conversation.name}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) =>
+                        renameConversation(conversation.id, event.target.value || "未命名会话")
+                      }
+                    />
+
+                    <button
+                      type="button"
+                      className="ghost-button danger-button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        deleteConversation(conversation.id);
+                      }}
+                    >
+                      删除
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="empty-card">
+                <p>当前模型还没有会话。</p>
+                <span>先创建一个新会话，再开始提问会更顺手。</span>
+              </div>
+            )}
+          </section>
+        </aside>
+
+        <main className="chat-main glass-panel">
+          {/* 聊天区头部：展示当前模型信息和配置状态。 */}
+          <div className="chat-main__header">
+            <div>
+              <p className="section-kicker">当前模型</p>
+              <h2>{MODEL_META[model].label}</h2>
+              <p className="chat-main__subtitle">{MODEL_META[model].description}</p>
+            </div>
+
+            <div className="chat-main__summary">
+              <span>{currentConversation?.messages.length ?? 0} 条消息</span>
+              <span>{currentConversation ? "已选中会话" : "未选中会话"}</span>
+            </div>
+          </div>
+
+          {/* 这里集中展示配置加载问题，避免状态信息散落在页面各处。 */}
+          {configStatus === "error" && (
+            <div className="alert-banner alert-banner--error">
+              配置加载失败：{configError}
+            </div>
+          )}
+
+          {!currentModelReady && configStatus === "ready" && (
+            <div className="alert-banner alert-banner--warning">
+              当前模型还没有配置完整。请前往设置页补充 Base URL、API Key 和模型名。
+            </div>
+          )}
+
+          {speechError && (
+            <div className="alert-banner alert-banner--warning">{speechError}</div>
+          )}
 
           <div className="chat-box">
             {currentConversation ? (
-              currentConversation.messages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`chat-line ${msg.role === "user" ? "chat-user" : "chat-ai"}`}
-                >
-                  <div className="chat-bubble">
-                    {msg.content}
-                  </div>
+              currentConversation.messages.length > 0 ? (
+                currentConversation.messages.map((message, index) => {
+                  const messageKey = `${currentConversation.id}-${message.role}-${index}`;
+                  const isAiReply = message.role === "ai";
+                  const isSpeaking = speakingMessageKey === messageKey;
+
+                  return (
+                    <div
+                      key={messageKey}
+                      className={`chat-line ${message.role === "user" ? "chat-user" : "chat-ai"}`}
+                    >
+                      <div className="chat-bubble">
+                        <div className="chat-bubble__topline">
+                          <span className="chat-role">
+                            {message.role === "user" ? "你" : MODEL_META[model].label}
+                          </span>
+
+                          {isAiReply && (
+                            <div className="chat-message-actions">
+                              <button
+                                type="button"
+                                className="chat-message-action"
+                                title={copiedMessageKey === messageKey ? "已复制" : "复制回复"}
+                                aria-label="复制回复"
+                                onClick={() => void copyReply(message.content, messageKey)}
+                              >
+                                <IoCopyOutline size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                className="chat-message-action"
+                                title={isSpeaking ? "停止朗读" : "朗读回复"}
+                                aria-label={isSpeaking ? "停止朗读" : "朗读回复"}
+                                disabled={!ttsReady && !isSpeaking}
+                                onClick={() => void speakReply(message.content, messageKey)}
+                              >
+                                {isSpeaking ? (
+                                  <IoStopCircleOutline size={17} />
+                                ) : (
+                                  <IoVolumeHigh size={17} />
+                                )}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <p>{message.content}</p>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="chat-empty-state">
+                  <h3>会话已创建</h3>
+                  <p>现在可以直接输入问题，或者先去设置页确认该模型的接口信息。</p>
                 </div>
-              ))
+              )
             ) : (
-              <div className="chat-empty">
-                请选择一个对话
+              <div className="chat-empty-state">
+                <h3>先选择一个会话</h3>
+                <p>如果左侧还是空的，可以点击“新建会话”快速开始。</p>
               </div>
             )}
 
             {loading && (
               <div className="chat-line chat-ai">
                 <div className="chat-bubble">
-                  思考中…
+                  <span className="chat-role">{MODEL_META[model].label}</span>
+                  <p>正在整理回复，请稍等...</p>
                 </div>
               </div>
             )}
+
+            <div ref={chatBottomRef} />
           </div>
 
-        </div>
-      </div>
+          {/* 底部输入区统一处理禁用态、回车发送和辅助说明。 */}
+          <div className="input-panel">
+            <div className="input-caption">
+              {currentConversation
+                ? "Enter 发送消息，先把模型配置好可以避免请求失败。"
+                : "请先创建或选择一个会话。"}
+            </div>
 
-      {/* 输入区域 */}
-      <div className="input-area">
-        <input
-          className="input-box"
-          value={input}
-          onChange={(e) =>
-            setInput(e.target.value)
-          }
-          placeholder="输入内容..."
-          disabled={loading || !currentConversation}
-          onKeyDown={(e) =>
-            e.key === "Enter" && sendMessage()
-          }
-        />
+            <div className="input-area">
+              <textarea
+                className="input-box"
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                placeholder="输入你的问题、代码需求或灵感草稿..."
+                disabled={loading || !currentConversation || !currentModelReady}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void sendMessage();
+                  }
+                }}
+              />
 
-        <button
-          className="btn-send"
-          onClick={sendMessage}
-          disabled={loading || !currentConversation}
-        >
-          {loading ? "思考中…" : "发送"}
-        </button>
+              <button
+                type="button"
+                className={`ghost-button record-button ${
+                  recordingState === "recording" ? "is-recording" : ""
+                }`}
+                onClick={toggleRecording}
+                disabled={
+                  loading ||
+                  !currentConversation ||
+                  !currentModelReady ||
+                  recordingState === "transcribing"
+                }
+                title={
+                  recordingState === "recording"
+                    ? "停止录音"
+                    : recordingState === "transcribing"
+                      ? "正在识别"
+                      : "语音输入"
+                }
+                aria-label={
+                  recordingState === "recording"
+                    ? "停止录音"
+                    : recordingState === "transcribing"
+                      ? "正在识别"
+                      : "语音输入"
+                }
+              >
+                {recordingState === "recording" ? (
+                  <IoStopCircleOutline size={20} />
+                ) : (
+                  <IoMic size={20} />
+                )}
+              </button>
+
+              <button
+                type="button"
+                className="primary-button send-button"
+                onClick={() => void sendMessage()}
+                disabled={
+                  loading ||
+                  !currentConversation ||
+                  !currentModelReady ||
+                  recordingState !== "idle"
+                }
+              >
+                {loading ? "发送中..." : "发送"}
+              </button>
+            </div>
+          </div>
+        </main>
       </div>
     </div>
   );

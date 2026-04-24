@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Local runtime configuration and secrets
+src-tauri/config.json
+src-tauri/config.local.json
+config.json
+config.local.json
+!src-tauri/config.example.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

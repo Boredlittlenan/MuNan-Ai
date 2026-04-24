@@ -1,0 +1,48 @@
+{
+  "openai": {
+    "base_url": "https://api.openai.com/v1/chat/completions",
+    "api_key": "",
+    "model": "gpt-4o-mini"
+  },
+  "deepseek": {
+    "base_url": "https://api.deepseek.com/v1/chat/completions",
+    "api_key": "",
+    "model": "deepseek-chat"
+  },
+  "qwen": {
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "api_key": "",
+    "model": "qwen-max"
+  },
+  "mimo": {
+    "base_url": "https://api.xiaomimimo.com/v1/chat/completions",
+    "api_key": "",
+    "model": "mimo-v2-flash"
+  },
+  "nvidia": {
+    "base_url": "https://integrate.api.nvidia.com/v1/chat/completions",
+    "api_key": "",
+    "model": "moonshotai/kimi-k2.5"
+  },
+  "speech": {
+    "asr": {
+      "provider": "openai_like",
+      "base_url": "",
+      "api_key": "",
+      "model": "",
+      "tencent_engine_type": "16k_zh_en",
+      "app_id": "",
+      "secret_id": "",
+      "secret_key": "",
+      "region": "ap-shanghai"
+    },
+    "tts": {
+      "base_url": "",
+      "api_key": "",
+      "model": "",
+      "voice": "",
+      "voice_description": ""
+    }
+  },
+  "custom_models": {}
+}
