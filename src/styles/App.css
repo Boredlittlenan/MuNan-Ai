@@ -225,6 +225,10 @@
   font-size: 14px;
 }
 
+.chat-bubble.is-editing {
+  width: min(76%, 780px);
+}
+
 .chat-ai .chat-bubble {
   background: rgba(255, 255, 255, 0.88);
   border: 1px solid rgba(114, 86, 241, 0.1);
@@ -290,6 +294,53 @@
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.original-reply-panel {
+  margin-top: 10px;
+  padding: 9px;
+  border-radius: 10px;
+  color: var(--text-2);
+  background: rgba(246, 248, 252, 0.9);
+  border: 1px solid var(--line-soft);
+}
+
+.original-reply-panel span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.reply-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reply-editor label {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.reply-editor__textarea {
+  width: min(680px, 100%);
+  min-height: 92px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line-soft);
+  resize: vertical;
+  font: inherit;
+  color: var(--text-1);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.reply-editor__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .chat-empty-state {
@@ -403,6 +454,10 @@
 
   .chat-bubble {
     max-width: 100%;
+  }
+
+  .chat-bubble.is-editing {
+    width: 100%;
   }
 
   .input-area {

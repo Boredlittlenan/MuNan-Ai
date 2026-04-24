@@ -5,7 +5,10 @@ import {
   IoAdd,
   IoChatbubbleEllipses,
   IoCopyOutline,
+  IoCreateOutline,
+  IoEyeOutline,
   IoMic,
+  IoSaveOutline,
   IoSettingsSharp,
   IoStopCircleOutline,
   IoVolumeHigh,
@@ -38,6 +41,18 @@ type SynthesizeSpeechResponse = {
 
 type TranscribeAudioResponse = {
   text: string;
+};
+
+type ChatReplyResponse = {
+  content: string;
+  tts_text: string;
+  original_content: string;
+};
+
+type EditingReplyDraft = {
+  messageKey: string;
+  content: string;
+  ttsText: string;
 };
 
 const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
@@ -179,6 +194,8 @@ function App() {
   const [speechError, setSpeechError] = useState("");
   const [speakingMessageKey, setSpeakingMessageKey] = useState<string | null>(null);
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
+  const [expandedOriginalKeys, setExpandedOriginalKeys] = useState<string[]>([]);
+  const [editingReply, setEditingReply] = useState<EditingReplyDraft | null>(null);
   const [recordingState, setRecordingState] = useState<"idle" | "recording" | "transcribing">(
     "idle"
   );
@@ -427,7 +444,7 @@ function App() {
         content: message.content,
       }));
 
-      const reply = await invoke<string>("chat_with_ai", {
+      const reply = await invoke<ChatReplyResponse>("chat_with_ai", {
         model,
         messages: apiMessages,
       });
@@ -438,7 +455,15 @@ function App() {
           conversation.id === currentConversation.id
             ? {
                 ...conversation,
-                messages: [...optimisticMessages, { role: "ai", content: reply }],
+                messages: [
+                  ...optimisticMessages,
+                  {
+                    role: "ai",
+                    content: reply.content,
+                    tts_text: reply.tts_text,
+                    original_content: reply.original_content || reply.content,
+                  },
+                ],
               }
             : conversation
         ),
@@ -466,6 +491,61 @@ function App() {
     }
   };
 
+  const toggleOriginal = (messageKey: string) => {
+    setExpandedOriginalKeys((current) =>
+      current.includes(messageKey)
+        ? current.filter((key) => key !== messageKey)
+        : [...current, messageKey]
+    );
+  };
+
+  const startEditReply = (message: Message, messageKey: string) => {
+    setEditingReply({
+      messageKey,
+      content: message.content,
+      ttsText: message.tts_text ?? "",
+    });
+  };
+
+  const cancelEditReply = () => {
+    setEditingReply(null);
+  };
+
+  const saveEditedReply = (conversationId: string, messageIndex: number) => {
+    if (!editingReply) {
+      return;
+    }
+
+    const nextContent = editingReply.content.trim();
+    if (!nextContent) {
+      setSpeechError("显示文本不能为空。");
+      return;
+    }
+
+    setConversations((previous) => ({
+      ...previous,
+      [model]: previous[model].map((conversation) =>
+        conversation.id === conversationId
+          ? {
+              ...conversation,
+              messages: conversation.messages.map((message, index) =>
+                index === messageIndex && message.role === "ai"
+                  ? {
+                      ...message,
+                      content: nextContent,
+                      tts_text: editingReply.ttsText.trim(),
+                      original_content: message.original_content ?? message.content,
+                    }
+                  : message
+              ),
+            }
+          : conversation
+      ),
+    }));
+    setEditingReply(null);
+    setSpeechError("");
+  };
+
   const copyReply = async (content: string, messageKey: string) => {
     try {
       await navigator.clipboard.writeText(content);
@@ -484,7 +564,7 @@ function App() {
     setSpeakingMessageKey(null);
   };
 
-  const speakReply = async (content: string, messageKey: string) => {
+  const speakReply = async (message: Message, messageKey: string) => {
     if (speakingMessageKey === messageKey) {
       stopSpeech();
       return;
@@ -502,9 +582,10 @@ function App() {
     setSpeakingMessageKey(messageKey);
 
     try {
+      const ttsText = message.tts_text?.trim() || message.content;
       const audio = await invoke<SynthesizeSpeechResponse>("synthesize_speech", {
         request: {
-          text: content,
+          text: ttsText,
           format: "wav",
         },
       });
@@ -811,7 +892,11 @@ function App() {
                       key={messageKey}
                       className={`chat-line ${message.role === "user" ? "chat-user" : "chat-ai"}`}
                     >
-                      <div className="chat-bubble">
+                      <div
+                        className={`chat-bubble ${
+                          editingReply?.messageKey === messageKey ? "is-editing" : ""
+                        }`}
+                      >
                         <div className="chat-bubble__topline">
                           <span className="chat-role">
                             {message.role === "user" ? "你" : MODEL_META[model].label}
@@ -831,10 +916,28 @@ function App() {
                               <button
                                 type="button"
                                 className="chat-message-action"
+                                title="显示原文"
+                                aria-label="显示原文"
+                                onClick={() => toggleOriginal(messageKey)}
+                              >
+                                <IoEyeOutline size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                className="chat-message-action"
+                                title="编辑回复"
+                                aria-label="编辑回复"
+                                onClick={() => startEditReply(message, messageKey)}
+                              >
+                                <IoCreateOutline size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                className="chat-message-action"
                                 title={isSpeaking ? "停止朗读" : "朗读回复"}
                                 aria-label={isSpeaking ? "停止朗读" : "朗读回复"}
                                 disabled={!ttsReady && !isSpeaking}
-                                onClick={() => void speakReply(message.content, messageKey)}
+                                onClick={() => void speakReply(message, messageKey)}
                               >
                                 {isSpeaking ? (
                                   <IoStopCircleOutline size={17} />
@@ -845,7 +948,66 @@ function App() {
                             </div>
                           )}
                         </div>
-                        <p>{message.content}</p>
+                        {editingReply?.messageKey === messageKey ? (
+                          <div className="reply-editor">
+                            <label htmlFor={`${messageKey}-content`}>显示文本</label>
+                            <textarea
+                              id={`${messageKey}-content`}
+                              className="reply-editor__textarea"
+                              value={editingReply.content}
+                              onChange={(event) =>
+                                setEditingReply((current) =>
+                                  current
+                                    ? { ...current, content: event.target.value }
+                                    : current
+                                )
+                              }
+                            />
+
+                            <label htmlFor={`${messageKey}-tts`}>朗读文本</label>
+                            <textarea
+                              id={`${messageKey}-tts`}
+                              className="reply-editor__textarea"
+                              value={editingReply.ttsText}
+                              placeholder="可添加 (温柔 平静)、[轻笑]、[停顿] 等标签；留空时朗读显示文本。"
+                              onChange={(event) =>
+                                setEditingReply((current) =>
+                                  current
+                                    ? { ...current, ttsText: event.target.value }
+                                    : current
+                                )
+                              }
+                            />
+
+                            <div className="reply-editor__actions">
+                              <button
+                                type="button"
+                                className="ghost-button"
+                                onClick={cancelEditReply}
+                              >
+                                取消
+                              </button>
+                              <button
+                                type="button"
+                                className="primary-button"
+                                onClick={() =>
+                                  saveEditedReply(currentConversation.id, index)
+                                }
+                              >
+                                <IoSaveOutline size={16} />
+                                保存
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p>{message.content}</p>
+                        )}
+                        {isAiReply && expandedOriginalKeys.includes(messageKey) && (
+                          <div className="original-reply-panel">
+                            <span>原文</span>
+                            <p>{message.original_content ?? message.content}</p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

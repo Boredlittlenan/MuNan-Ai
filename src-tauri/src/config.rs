@@ -66,7 +66,7 @@ fn default_tencent_region() -> String {
 }
 
 fn default_tencent_engine_type() -> String {
-    "16k_zh_en".into()
+    "16k_zh-PY".into()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -78,6 +78,24 @@ pub struct TtsConfig {
     pub voice: String,
     #[serde(default)]
     pub voice_description: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PersonaConfig {
+    #[serde(default = "default_persona_prompt")]
+    pub prompt: String,
+}
+
+impl Default for PersonaConfig {
+    fn default() -> Self {
+        Self {
+            prompt: default_persona_prompt(),
+        }
+    }
+}
+
+fn default_persona_prompt() -> String {
+    "你是 MuNan AI，一个温和、清晰、可靠的桌面 AI 助手。你会优先理解用户真实意图，回答时直接、有条理，并在需要时给出可执行步骤。".into()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -94,6 +112,8 @@ pub struct AppConfig {
     pub nvidia: ModelConfig,
     #[serde(default)]
     pub speech: SpeechConfig,
+    #[serde(default)]
+    pub persona: PersonaConfig,
     #[serde(default)]
     pub custom_models: HashMap<String, Vec<String>>,
 }

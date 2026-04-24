@@ -163,12 +163,7 @@ async fn transcribe_with_tencent(
         .decode(audio_base64)
         .map_err(|error| format!("录音 Base64 解码失败: {}", error))?;
     let voice_format = voice_format_from_mime(&request.mime_type);
-    let endpoint = if cfg.base_url.trim().is_empty() {
-        TENCENT_ASR_ENDPOINT
-    } else {
-        cfg.base_url.trim()
-    };
-    let url = reqwest::Url::parse(endpoint)
+    let url = reqwest::Url::parse(TENCENT_ASR_ENDPOINT)
         .map_err(|error| format!("腾讯云 ASR Endpoint 格式错误: {}", error))?;
     let host = url
         .host_str()
@@ -180,8 +175,9 @@ async fn transcribe_with_tencent(
         url.path().to_string()
     };
     let canonical_querystring = url.query().unwrap_or("").to_string();
-    let timestamp = Utc::now().timestamp();
-    let date = Utc::now().format("%Y-%m-%d").to_string();
+    let now = Utc::now();
+    let timestamp = now.timestamp();
+    let date = now.format("%Y-%m-%d").to_string();
     let body = json!({
         "ProjectId": 0,
         "SubServiceType": 2,
@@ -200,6 +196,7 @@ async fn transcribe_with_tencent(
         &host,
         &canonical_uri,
         &canonical_querystring,
+        TENCENT_ASR_ACTION,
         &payload,
         timestamp,
         &date,
@@ -265,13 +262,19 @@ fn tencent_authorization(
     host: &str,
     canonical_uri: &str,
     canonical_querystring: &str,
+    action: &str,
     payload: &str,
     timestamp: i64,
     date: &str,
 ) -> Result<String, String> {
     let http_request_method = "POST";
-    let canonical_headers = format!("content-type:{}\nhost:{}\n", TENCENT_CONTENT_TYPE, host);
-    let signed_headers = "content-type;host";
+    let canonical_headers = format!(
+        "content-type:{}\nhost:{}\nx-tc-action:{}\n",
+        TENCENT_CONTENT_TYPE,
+        host,
+        action.to_ascii_lowercase()
+    );
+    let signed_headers = "content-type;host;x-tc-action";
     let hashed_request_payload = sha256_hex(payload.as_bytes());
     let canonical_request = format!(
         "{}\n{}\n{}\n{}\n{}\n{}",

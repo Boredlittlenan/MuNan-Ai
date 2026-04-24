@@ -8,6 +8,17 @@
   gap: 14px;
 }
 
+.settings-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.settings-file-input {
+  display: none;
+}
+
 .back-button {
   flex-shrink: 0;
 }
@@ -203,6 +214,14 @@
 
 .speech-settings-panel {
   margin-top: 16px;
+}
+
+.persona-settings-panel {
+  margin-top: 16px;
+}
+
+.persona-textarea {
+  min-height: 150px;
 }
 
 .speech-settings-grid {

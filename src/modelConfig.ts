@@ -16,6 +16,8 @@ export type ModelType = (typeof MODEL_OPTIONS)[number]["id"];
 export type Message = {
   role: "user" | "ai";
   content: string;
+  tts_text?: string;
+  original_content?: string;
 };
 
 export type Conversation = {
@@ -51,8 +53,13 @@ export type SpeechConfig = {
   tts: TtsConfig;
 };
 
+export type PersonaConfig = {
+  prompt: string;
+};
+
 export type AppConfig = Record<ModelType, ModelConfig> & {
   speech: SpeechConfig;
+  persona: PersonaConfig;
   custom_models: Record<ModelType, string[]>;
 };
 
@@ -143,13 +150,17 @@ export const createEmptyAppConfig = (): AppConfig => ({
       base_url: "",
       api_key: "",
       model: "",
-      tencent_engine_type: "16k_zh_en",
+      tencent_engine_type: "16k_zh-PY",
       app_id: "",
       secret_id: "",
       secret_key: "",
       region: "ap-shanghai",
     },
     tts: { base_url: "", api_key: "", model: "", voice: "", voice_description: "" },
+  },
+  persona: {
+    prompt:
+      "你是 MuNan AI，一个温和、清晰、可靠的桌面 AI 助手。你会优先理解用户真实意图，回答时直接、有条理，并在需要时给出可执行步骤。",
   },
   custom_models: {
     openai: [],
@@ -170,6 +181,7 @@ export const normalizeAppConfig = (
           asr: Partial<AsrConfig>;
           tts: Partial<TtsConfig>;
         }>;
+        persona?: Partial<PersonaConfig>;
         custom_models?: Partial<Record<ModelType, string[]>>;
       })
     | null
@@ -192,7 +204,7 @@ export const normalizeAppConfig = (
       base_url: value?.speech?.asr?.base_url ?? "",
       api_key: value?.speech?.asr?.api_key ?? "",
       model: value?.speech?.asr?.model ?? "",
-      tencent_engine_type: value?.speech?.asr?.tencent_engine_type ?? "16k_zh_en",
+      tencent_engine_type: value?.speech?.asr?.tencent_engine_type ?? "16k_zh-PY",
       app_id: value?.speech?.asr?.app_id ?? "",
       secret_id: value?.speech?.asr?.secret_id ?? "",
       secret_key: value?.speech?.asr?.secret_key ?? "",
@@ -205,6 +217,9 @@ export const normalizeAppConfig = (
       voice: value?.speech?.tts?.voice ?? "",
       voice_description: value?.speech?.tts?.voice_description ?? "",
     },
+  };
+  fallback.persona = {
+    prompt: value?.persona?.prompt ?? fallback.persona.prompt,
   };
 
   for (const option of MODEL_OPTIONS) {
@@ -244,7 +259,21 @@ export const loadConversationsFromStorage = (): Record<ModelType, Conversation[]
     const fallback = createEmptyConversations();
 
     for (const option of MODEL_OPTIONS) {
-      fallback[option.id] = Array.isArray(parsed?.[option.id]) ? parsed[option.id]! : [];
+      fallback[option.id] = Array.isArray(parsed?.[option.id])
+        ? parsed[option.id]!.map((conversation) => ({
+            ...conversation,
+            messages: Array.isArray(conversation.messages)
+              ? conversation.messages
+                  .filter((message) => message.role === "user" || message.role === "ai")
+                  .map((message) => ({
+                    role: message.role,
+                    content: message.content ?? "",
+                    tts_text: message.tts_text,
+                    original_content: message.original_content,
+                  }))
+              : [],
+          }))
+        : [];
     }
 
     return fallback;

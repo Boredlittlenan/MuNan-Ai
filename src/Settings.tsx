@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useNavigate } from "react-router-dom";
 import {
   IoArrowBack,
   IoCheckmarkCircle,
+  IoCloudUploadOutline,
+  IoDownloadOutline,
   IoInformationCircleOutline,
   IoRefresh,
   IoSave,
@@ -14,6 +16,7 @@ import "./styles/Settings.css";
 
 import {
   type AppConfig,
+  type AsrProvider,
   type ModelType,
   MODEL_CATALOG,
   MODEL_META,
@@ -24,6 +27,15 @@ import {
   normalizeAppConfig,
   savePreferredModel,
 } from "./modelConfig";
+
+const TENCENT_ASR_ENGINE_OPTIONS = [
+  { value: "16k_zh-PY", label: "16k_zh-PY（中英粤）" },
+  { value: "16k_zh", label: "16k_zh（中文普通话）" },
+  { value: "16k_en", label: "16k_en（英语）" },
+  { value: "16k_yue", label: "16k_yue（粤语）" },
+  { value: "8k_zh", label: "8k_zh（电话中文）" },
+  { value: "8k_en", label: "8k_en（电话英语）" },
+];
 
 /* =========================
    页面职责说明
@@ -60,6 +72,7 @@ function Settings() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [customModelName, setCustomModelName] = useState("");
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   /**
    * 当前右侧表单绑定的模型配置。
@@ -140,6 +153,32 @@ function Settings() {
     }));
   };
 
+  const updatePersonaPrompt = (prompt: string) => {
+    setConfig((previous) => ({
+      ...previous,
+      persona: {
+        ...previous.persona,
+        prompt,
+      },
+    }));
+  };
+
+  const switchAsrProvider = (provider: AsrProvider) => {
+    setConfig((previous) => ({
+      ...previous,
+      speech: {
+        ...previous.speech,
+        asr: {
+          ...previous.speech.asr,
+          provider,
+          tencent_engine_type:
+            previous.speech.asr.tencent_engine_type.trim() || "16k_zh-PY",
+          region: previous.speech.asr.region.trim() || "ap-shanghai",
+        },
+      },
+    }));
+  };
+
   /**
    * 把当前选中模型的字段一键清空。
    * 仅影响当前卡片，不会误删其他模型配置。
@@ -206,6 +245,48 @@ function Settings() {
     }
   };
 
+  const exportSettings = () => {
+    const content = JSON.stringify(config, null, 2);
+    const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+
+    anchor.href = url;
+    anchor.download = `munan-ai-settings-${timestamp}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setError("");
+    setMessage("配置已导出为 JSON 备份文件。");
+  };
+
+  const requestImportSettings = () => {
+    importInputRef.current?.click();
+  };
+
+  const importSettings = async (file: File | undefined) => {
+    if (!file) {
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as Partial<AppConfig>;
+      setConfig(normalizeAppConfig(parsed));
+      setError("");
+      setMessage("配置已导入到表单。确认无误后点击“保存设置”写入配置文件。");
+    } catch (importError) {
+      setMessage("");
+      setError(`配置导入失败：${String(importError)}`);
+    } finally {
+      if (importInputRef.current) {
+        importInputRef.current.value = "";
+      }
+    }
+  };
+
   /**
    * 当用户怀疑表单和磁盘内容不一致时，可以重新从后端拉取。
    */
@@ -245,6 +326,24 @@ function Settings() {
         </div>
 
         <div className="settings-header__actions">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="settings-file-input"
+            onChange={(event) => void importSettings(event.target.files?.[0])}
+          />
+
+          <button type="button" className="ghost-button" onClick={exportSettings}>
+            <IoDownloadOutline size={18} />
+            导出设置
+          </button>
+
+          <button type="button" className="ghost-button" onClick={requestImportSettings}>
+            <IoCloudUploadOutline size={18} />
+            导入设置
+          </button>
+
           <button type="button" className="ghost-button" onClick={() => void reloadSettings()}>
             <IoRefresh size={18} />
             重新加载
@@ -447,41 +546,29 @@ function Settings() {
                 <div className="settings-field speech-settings-card">
                   <div>
                     <p className="section-kicker">ASR</p>
-                    <h3>语音识别模型</h3>
+                    <h3>语音识别</h3>
                   </div>
 
-                  <label htmlFor="asr-provider">识别服务</label>
+                  <label htmlFor="asr-provider-current">识别服务</label>
                   <select
-                    id="asr-provider"
+                    id="asr-provider-current"
                     className="settings-input"
                     value={config.speech.asr.provider}
-                    onChange={(event) =>
-                      updateSpeechField("asr", "provider", event.target.value)
-                    }
+                    onChange={(event) => switchAsrProvider(event.target.value as AsrProvider)}
                   >
                     <option value="openai_like">OpenAI-like / MIMO</option>
                     <option value="tencent">腾讯云语音识别</option>
                   </select>
 
-                  <label htmlFor="asr-base-url">Base URL</label>
-                  <input
-                    id="asr-base-url"
-                    className="settings-input"
-                    type="text"
-                    value={config.speech.asr.base_url}
-                    placeholder={
-                      config.speech.asr.provider === "tencent"
-                        ? "默认 https://asr.tencentcloudapi.com"
-                        : "例如 https://api.example.com/v1/audio/transcriptions"
-                    }
-                    onChange={(event) => updateSpeechField("asr", "base_url", event.target.value)}
-                  />
-
                   {config.speech.asr.provider === "tencent" ? (
                     <>
-                      <label htmlFor="asr-app-id">腾讯云 AppId</label>
+                      <p className="settings-help-text">
+                        腾讯云模式固定调用 https://asr.tencentcloudapi.com，不使用 OpenAI-like 的 Base URL、API Key 和模型名称。
+                      </p>
+
+                      <label htmlFor="asr-app-id-current">腾讯云 AppId</label>
                       <input
-                        id="asr-app-id"
+                        id="asr-app-id-current"
                         className="settings-input"
                         type="text"
                         value={config.speech.asr.app_id}
@@ -491,9 +578,9 @@ function Settings() {
                         }
                       />
 
-                      <label htmlFor="asr-secret-id">SecretId</label>
+                      <label htmlFor="asr-secret-id-current">SecretId</label>
                       <input
-                        id="asr-secret-id"
+                        id="asr-secret-id-current"
                         className="settings-input"
                         type="password"
                         value={config.speech.asr.secret_id}
@@ -503,9 +590,9 @@ function Settings() {
                         }
                       />
 
-                      <label htmlFor="asr-secret-key">SecretKey</label>
+                      <label htmlFor="asr-secret-key-current">SecretKey</label>
                       <input
-                        id="asr-secret-key"
+                        id="asr-secret-key-current"
                         className="settings-input"
                         type="password"
                         value={config.speech.asr.secret_key}
@@ -515,9 +602,9 @@ function Settings() {
                         }
                       />
 
-                      <label htmlFor="asr-region">地域</label>
+                      <label htmlFor="asr-region-current">地域</label>
                       <input
-                        id="asr-region"
+                        id="asr-region-current"
                         className="settings-input"
                         type="text"
                         value={config.speech.asr.region}
@@ -526,12 +613,44 @@ function Settings() {
                           updateSpeechField("asr", "region", event.target.value)
                         }
                       />
+
+                      <label htmlFor="asr-engine-type-current">识别引擎类型</label>
+                      <select
+                        id="asr-engine-type-current"
+                        className="settings-input"
+                        value={config.speech.asr.tencent_engine_type}
+                        onChange={(event) =>
+                          updateSpeechField(
+                            "asr",
+                            "tencent_engine_type",
+                            event.target.value
+                          )
+                        }
+                      >
+                        {TENCENT_ASR_ENGINE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </>
                   ) : (
                     <>
-                      <label htmlFor="asr-api-key">API Key</label>
+                      <label htmlFor="asr-base-url-current">Base URL</label>
                       <input
-                        id="asr-api-key"
+                        id="asr-base-url-current"
+                        className="settings-input"
+                        type="text"
+                        value={config.speech.asr.base_url}
+                        placeholder="例如 https://api.example.com/v1/audio/transcriptions"
+                        onChange={(event) =>
+                          updateSpeechField("asr", "base_url", event.target.value)
+                        }
+                      />
+
+                      <label htmlFor="asr-api-key-current">API Key</label>
+                      <input
+                        id="asr-api-key-current"
                         className="settings-input"
                         type="password"
                         value={config.speech.asr.api_key}
@@ -540,36 +659,20 @@ function Settings() {
                           updateSpeechField("asr", "api_key", event.target.value)
                         }
                       />
+
+                      <label htmlFor="asr-model-current">模型名称</label>
+                      <input
+                        id="asr-model-current"
+                        className="settings-input"
+                        type="text"
+                        value={config.speech.asr.model}
+                        placeholder="例如 mimo-v2.5 / whisper-1 / paraformer-realtime"
+                        onChange={(event) =>
+                          updateSpeechField("asr", "model", event.target.value)
+                        }
+                      />
                     </>
                   )}
-
-                  <label htmlFor="asr-model">
-                    {config.speech.asr.provider === "tencent" ? "识别引擎类型" : "模型名称"}
-                  </label>
-                  <input
-                    id="asr-model"
-                    className="settings-input"
-                    type="text"
-                    value={
-                      config.speech.asr.provider === "tencent"
-                        ? config.speech.asr.tencent_engine_type
-                        : config.speech.asr.model
-                    }
-                    placeholder={
-                      config.speech.asr.provider === "tencent"
-                        ? "默认 16k_zh_en，对应 EngSerViceType"
-                        : "例如 whisper-1 / paraformer-realtime"
-                    }
-                    onChange={(event) =>
-                      updateSpeechField(
-                        "asr",
-                        config.speech.asr.provider === "tencent"
-                          ? "tencent_engine_type"
-                          : "model",
-                        event.target.value
-                      )
-                    }
-                  />
                 </div>
 
                 <div className="settings-field speech-settings-card">
@@ -638,6 +741,29 @@ function Settings() {
                     }
                   />
                 </div>
+              </div>
+            </section>
+          )}
+
+          {!loading && (
+            <section className="persona-settings-panel">
+              <div className="settings-field">
+                <div>
+                  <p className="section-kicker">Persona</p>
+                  <h3>AI 人设</h3>
+                </div>
+
+                <label htmlFor="persona-prompt">后台人设提示词</label>
+                <textarea
+                  id="persona-prompt"
+                  className="settings-input settings-textarea persona-textarea"
+                  value={config.persona.prompt}
+                  placeholder="例如：你是一个温和、清晰、可靠的桌面 AI 助手，回答直接、有条理。"
+                  onChange={(event) => updatePersonaPrompt(event.target.value)}
+                />
+                <p className="settings-help-text">
+                  这段内容会作为 system message 注入每次聊天请求。语气、身份、回答边界都可以在这里手动调整。
+                </p>
               </div>
             </section>
           )}
