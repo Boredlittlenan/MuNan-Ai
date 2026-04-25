@@ -28,14 +28,17 @@ import {
   type AppConfig,
   type AsrProvider,
   type ModelType,
-  MODEL_CATALOG,
-  MODEL_META,
-  MODEL_OPTIONS,
   createEmptyAppConfig,
+  getModelChoices,
+  getModelConfig,
+  getModelMeta,
+  getModelOptions,
   isModelConfigured,
+  isBuiltInModel,
   loadPreferredModel,
   normalizeAppConfig,
   savePreferredModel,
+  updateModelConfig,
 } from "./modelConfig";
 
 const TENCENT_ASR_ENGINE_OPTIONS = [
@@ -92,13 +95,13 @@ function Settings() {
    * 当前右侧表单绑定的模型配置。
    * 用 useMemo 保持写法简洁，也能让 JSX 更聚焦于布局本身。
    */
-  const selectedConfig = useMemo(() => config[selectedModel], [config, selectedModel]);
+  const modelOptions = useMemo(() => getModelOptions(config), [config]);
+  const selectedConfig = useMemo(() => getModelConfig(config, selectedModel), [config, selectedModel]);
+  const selectedMeta = useMemo(() => getModelMeta(config, selectedModel), [config, selectedModel]);
+  const isCustomProviderSelected = !isBuiltInModel(selectedModel);
   const selectedModelChoices = useMemo(() => {
-    const builtInModels = MODEL_CATALOG[selectedModel] ?? [];
-    const customModels = config.custom_models[selectedModel] ?? [];
-
-    return Array.from(new Set([...builtInModels, ...customModels, selectedConfig.model].filter(Boolean)));
-  }, [config.custom_models, selectedConfig.model, selectedModel]);
+    return getModelChoices(config, selectedModel);
+  }, [config, selectedModel]);
 
   /**
    * 页面加载时从后端读取最新配置。
@@ -130,12 +133,18 @@ function Settings() {
     field: "base_url" | "api_key" | "model",
     value: string
   ) => {
+    setConfig((previous) => updateModelConfig(previous, selectedModel, { [field]: value }));
+  };
+
+  const updateCustomProviderField = (
+    field: "label" | "provider",
+    value: string
+  ) => {
     setConfig((previous) => ({
       ...previous,
-      [selectedModel]: {
-        ...previous[selectedModel],
-        [field]: value,
-      },
+      custom_providers: previous.custom_providers.map((provider) =>
+        provider.id === selectedModel ? { ...provider, [field]: value } : provider
+      ),
     }));
   };
 
@@ -224,16 +233,78 @@ function Settings() {
    * 仅影响当前卡片，不会误删其他模型配置。
    */
   const clearSelectedModel = () => {
-    setConfig((previous) => ({
-      ...previous,
-      [selectedModel]: {
+    setConfig((previous) =>
+      updateModelConfig(previous, selectedModel, {
         base_url: "",
         api_key: "",
         model: "",
-      },
-    }));
+      })
+    );
     setExportedConfigPath("");
-    setMessage(`${MODEL_META[selectedModel].label} 配置已清空，保存后才会写入文件。`);
+    setMessage(`${selectedMeta.label} 配置已清空，保存后才会写入文件。`);
+  };
+
+  const addCustomProvider = () => {
+    const label = window.prompt("请输入自定义供应商名称，例如：Moonshot / OpenRouter / 本地模型");
+    const trimmedLabel = label?.trim();
+
+    if (!trimmedLabel) {
+      return;
+    }
+
+    const baseId = `custom-${trimmedLabel
+      .toLowerCase()
+      .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+      .replace(/^-+|-+$/g, "") || Date.now()}`;
+    let nextId = baseId;
+    let index = 2;
+
+    while (config.custom_providers.some((provider) => provider.id === nextId)) {
+      nextId = `${baseId}-${index}`;
+      index += 1;
+    }
+
+    setConfig((previous) => ({
+      ...previous,
+      custom_providers: [
+        ...previous.custom_providers,
+        {
+          id: nextId,
+          label: trimmedLabel,
+          provider: "自定义供应商",
+          base_url: "",
+          api_key: "",
+          model: "",
+          custom_models: [],
+        },
+      ],
+    }));
+    setSelectedModel(nextId);
+    setMessage("已添加自定义供应商，填写配置后点击保存设置。");
+    setError("");
+  };
+
+  const removeCustomProvider = () => {
+    if (isBuiltInModel(selectedModel)) {
+      return;
+    }
+
+    const confirmed = window.confirm(`确认删除自定义供应商“${selectedMeta.label}”吗？`);
+    if (!confirmed) {
+      return;
+    }
+
+    setConfig((previous) => ({
+      ...previous,
+      custom_providers: previous.custom_providers.filter(
+        (provider) => provider.id !== selectedModel
+      ),
+    }));
+    setSelectedModel("openai");
+    if (preferredModel === selectedModel) {
+      setPreferredModel("openai");
+    }
+    setMessage("自定义供应商已删除，保存后写入配置文件。");
   };
 
   const addCustomModel = () => {
@@ -245,9 +316,25 @@ function Settings() {
     }
 
     setConfig((previous) => {
+      if (!isBuiltInModel(selectedModel)) {
+        return {
+          ...previous,
+          custom_providers: previous.custom_providers.map((provider) =>
+            provider.id === selectedModel
+              ? {
+                  ...provider,
+                  model: nextModelName,
+                  custom_models: Array.from(
+                    new Set([...provider.custom_models, nextModelName])
+                  ),
+                }
+              : provider
+          ),
+        };
+      }
+
       const previousCustomModels = previous.custom_models[selectedModel] ?? [];
       const nextCustomModels = Array.from(new Set([...previousCustomModels, nextModelName]));
-
       return {
         ...previous,
         [selectedModel]: {
@@ -264,7 +351,7 @@ function Settings() {
     setCustomModelName("");
     setError("");
     setExportedConfigPath("");
-    setMessage(`${MODEL_META[selectedModel].label} 已添加自定义模型，保存后写入配置文件。`);
+    setMessage(`${selectedMeta.label} 已添加自定义模型，保存后写入配置文件。`);
   };
 
   /**
@@ -475,11 +562,13 @@ function Settings() {
               <p className="section-kicker">模型导航</p>
               <h2>选择要编辑的模型</h2>
             </div>
-            <span className="section-badge">{MODEL_OPTIONS.length} 个模型</span>
+            <button type="button" className="ghost-button" onClick={addCustomProvider}>
+              添加供应商
+            </button>
           </div>
 
           <div className="settings-model-list">
-            {MODEL_OPTIONS.map((option) => {
+            {modelOptions.map((option) => {
               const ready = isModelConfigured(config, option.id);
 
               return (
@@ -496,8 +585,8 @@ function Settings() {
                   }}
                 >
                   <div>
-                    <span className="settings-model-card__title">{MODEL_META[option.id].label}</span>
-                    <span className="settings-model-card__meta">{MODEL_META[option.id].provider}</span>
+                    <span className="settings-model-card__title">{option.label}</span>
+                    <span className="settings-model-card__meta">{option.provider}</span>
                   </div>
 
                   <span className={`status-chip ${ready ? "is-ready" : "is-warning"}`}>
@@ -516,9 +605,9 @@ function Settings() {
               value={preferredModel}
               onChange={(event) => setPreferredModel(event.target.value as ModelType)}
             >
-              {MODEL_OPTIONS.map((option) => (
+              {modelOptions.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {MODEL_META[option.id].label} · {MODEL_META[option.id].provider}
+                  {option.label} · {option.provider}
                 </option>
               ))}
             </select>
@@ -533,11 +622,16 @@ function Settings() {
           <div className="settings-main__header">
             <div>
               <p className="section-kicker">当前编辑</p>
-              <h2>{MODEL_META[selectedModel].label}</h2>
-              <p className="settings-main__subtitle">{MODEL_META[selectedModel].description}</p>
+              <h2>{selectedMeta.label}</h2>
+              <p className="settings-main__subtitle">{selectedMeta.description}</p>
             </div>
 
             <div className="settings-main__actions">
+              {isCustomProviderSelected && (
+                <button type="button" className="ghost-button danger-button" onClick={removeCustomProvider}>
+                  删除供应商
+                </button>
+              )}
               <button type="button" className="ghost-button danger-button" onClick={clearSelectedModel}>
                 清空当前模型
               </button>
@@ -551,6 +645,30 @@ function Settings() {
             </div>
           ) : (
             <div className="settings-form">
+              {isCustomProviderSelected && (
+                <div className="settings-field">
+                  <label htmlFor="custom-provider-label">供应商名称</label>
+                  <input
+                    id="custom-provider-label"
+                    className="settings-input"
+                    type="text"
+                    value={selectedMeta.label}
+                    placeholder="例如 OpenRouter / Moonshot / 本地模型"
+                    onChange={(event) => updateCustomProviderField("label", event.target.value)}
+                  />
+
+                  <label htmlFor="custom-provider-subtitle">供应商说明</label>
+                  <input
+                    id="custom-provider-subtitle"
+                    className="settings-input"
+                    type="text"
+                    value={selectedMeta.provider}
+                    placeholder="例如 OpenAI-compatible"
+                    onChange={(event) => updateCustomProviderField("provider", event.target.value)}
+                  />
+                </div>
+              )}
+
               <div className="settings-field">
                 <label htmlFor="base-url">Base URL</label>
                 <input
@@ -558,7 +676,7 @@ function Settings() {
                   className="settings-input"
                   type="text"
                   value={selectedConfig.base_url}
-                  placeholder={MODEL_META[selectedModel].baseUrlPlaceholder}
+                  placeholder={selectedMeta.baseUrlPlaceholder}
                   onChange={(event) => updateSelectedModelField("base_url", event.target.value)}
                 />
                 <p className="settings-help-text">

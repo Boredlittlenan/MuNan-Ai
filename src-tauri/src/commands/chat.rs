@@ -22,7 +22,20 @@ pub async fn chat_with_ai(messages: Vec<ChatMessage>, model: String) -> Result<C
         "qwen" => crate::ai::qwen::call_qwen(guided_messages, config.qwen).await,
         "mimo" => crate::ai::mimo::call_mimo(guided_messages, config.mimo).await,
         "nvidia" => crate::ai::nvidia::call_nvidia(guided_messages, config.nvidia).await,
-        _ => Err(format!("未知模型: {}", model)),
+        _ => {
+            let provider = config
+                .custom_providers
+                .into_iter()
+                .find(|provider| provider.id == model)
+                .ok_or_else(|| format!("未知模型: {}", model))?;
+            crate::ai::openai_like::chat_api(
+                &provider.base_url,
+                &provider.api_key,
+                &provider.model,
+                guided_messages,
+            )
+            .await
+        }
     }?;
 
     Ok(parse_chat_reply(&reply))

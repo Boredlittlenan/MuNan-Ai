@@ -118,7 +118,7 @@
 
 .settings-select {
   min-height: var(--control-height);
-  padding: 0 12px;
+  padding: 0 42px 0 12px;
   border-radius: 12px;
 }
 
@@ -180,6 +180,10 @@
   min-height: var(--control-height);
   padding: 0 12px;
   border-radius: 12px;
+}
+
+select.settings-input {
+  padding-right: 42px;
 }
 
 .password-input-row {

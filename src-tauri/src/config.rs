@@ -12,6 +12,22 @@ pub struct ModelConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct CustomProviderConfig {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub custom_models: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SpeechConfig {
     #[serde(default)]
     pub asr: AsrConfig,
@@ -134,6 +150,8 @@ pub struct AppConfig {
     pub webdav: WebDavConfig,
     #[serde(default)]
     pub custom_models: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    pub custom_providers: Vec<CustomProviderConfig>,
 }
 
 fn config_path_candidates() -> Vec<PathBuf> {

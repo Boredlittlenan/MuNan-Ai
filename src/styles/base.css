@@ -297,6 +297,37 @@ select {
   font-size: 14px;
 }
 
+select {
+  appearance: none;
+  padding-right: 42px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #66758f 50%),
+    linear-gradient(135deg, #66758f 50%, transparent 50%);
+  background-position:
+    calc(100% - 22px) 50%,
+    calc(100% - 16px) 50%;
+  background-size:
+    6px 6px,
+    6px 6px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+select:hover:not(:disabled) {
+  border-color: rgba(29, 114, 243, 0.28);
+  background-color: #fff;
+}
+
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+select option {
+  color: var(--text-1);
+  background: #fff;
+}
+
 input:focus,
 textarea:focus,
 select:focus {

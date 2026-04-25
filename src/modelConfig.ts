@@ -1,6 +1,6 @@
 /**
- * 统一维护前后端都会用到的模型元数据、页面类型和本地存储工具。
- * 这样聊天页和设置页就不会各自写一套字符串常量，后续扩展模型时也更稳。
+ * 统一维护模型元数据、页面类型和本地存储工具。
+ * 内置供应商走固定后端适配器，自定义供应商统一按 OpenAI-compatible 接口调用。
  */
 
 export const MODEL_OPTIONS = [
@@ -8,10 +8,11 @@ export const MODEL_OPTIONS = [
   { id: "deepseek", label: "DeepSeek", provider: "深度求索", accent: "emerald" },
   { id: "qwen", label: "Qwen", provider: "通义千问", accent: "amber" },
   { id: "mimo", label: "MIMO", provider: "小米大模型", accent: "rose" },
-  { id: "nvidia", label: "NVIDIA", provider: "nvidia开放平台", accent: "violet" },
+  { id: "nvidia", label: "NVIDIA", provider: "NVIDIA 开放平台", accent: "violet" },
 ] as const;
 
-export type ModelType = (typeof MODEL_OPTIONS)[number]["id"];
+export type BuiltInModelType = (typeof MODEL_OPTIONS)[number]["id"];
+export type ModelType = string;
 
 export type Message = {
   role: "user" | "ai";
@@ -30,6 +31,13 @@ export type ModelConfig = {
   base_url: string;
   api_key: string;
   model: string;
+};
+
+export type CustomProviderConfig = ModelConfig & {
+  id: string;
+  label: string;
+  provider: string;
+  custom_models: string[];
 };
 
 export type AsrProvider = "openai_like" | "tencent";
@@ -64,34 +72,39 @@ export type WebDavConfig = {
   path: string;
 };
 
-export type AppConfig = Record<ModelType, ModelConfig> & {
+export type AppConfig = Record<BuiltInModelType, ModelConfig> & {
   speech: SpeechConfig;
   persona: PersonaConfig;
   webdav: WebDavConfig;
-  custom_models: Record<ModelType, string[]>;
+  custom_models: Record<BuiltInModelType, string[]>;
+  custom_providers: CustomProviderConfig[];
 };
 
-export const MODEL_CATALOG: Record<ModelType, string[]> = {
+export type ModelOption = {
+  id: ModelType;
+  label: string;
+  provider: string;
+  accent: string;
+};
+
+export type ModelMeta = {
+  label: string;
+  provider: string;
+  accent: string;
+  description: string;
+  baseUrlPlaceholder: string;
+  modelPlaceholder: string;
+};
+
+export const MODEL_CATALOG: Record<BuiltInModelType, string[]> = {
   openai: ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"],
   deepseek: ["deepseek-chat", "deepseek-reasoner"],
   qwen: ["qwen-max", "qwen-plus", "qwen-turbo", "qwen3-max"],
   mimo: ["mimo-v2-flash"],
-  nvidia: [
-    "moonshotai/kimi-k2.5",
-  ],
+  nvidia: ["moonshotai/kimi-k2.5"],
 };
 
-export const MODEL_META: Record<
-  ModelType,
-  {
-    label: string;
-    provider: string;
-    accent: string;
-    description: string;
-    baseUrlPlaceholder: string;
-    modelPlaceholder: string;
-  }
-> = {
+export const MODEL_META: Record<BuiltInModelType, ModelMeta> = {
   openai: {
     label: "OpenAI",
     provider: "GPT 系列",
@@ -139,10 +152,6 @@ const CONVERSATIONS_STORAGE_KEY = "chatConversations";
 const USER_STATE_STORAGE_KEY = "userState";
 const PREFERRED_MODEL_STORAGE_KEY = "preferredModel";
 
-/**
- * 为所有模型生成一份完整的空配置。
- * 后端缺字段或者新增模型时，前端可以先用这份结构兜底。
- */
 export const createEmptyAppConfig = (): AppConfig => ({
   openai: { base_url: "", api_key: "", model: "" },
   deepseek: { base_url: "", api_key: "", model: "" },
@@ -180,21 +189,103 @@ export const createEmptyAppConfig = (): AppConfig => ({
     mimo: [],
     nvidia: [],
   },
+  custom_providers: [],
 });
 
-/**
- * 对后端返回的数据做一次归一化，避免出现 undefined 字段导致表单受控报错。
- */
+export const isBuiltInModel = (model: string | null | undefined): model is BuiltInModelType => {
+  return MODEL_OPTIONS.some((option) => option.id === model);
+};
+
+export const getModelOptions = (config: AppConfig): ModelOption[] => [
+  ...MODEL_OPTIONS,
+  ...config.custom_providers.map((provider) => ({
+    id: provider.id,
+    label: provider.label || provider.id,
+    provider: provider.provider || "自定义供应商",
+    accent: "slate",
+  })),
+];
+
+export const getModelMeta = (config: AppConfig, model: ModelType): ModelMeta => {
+  if (isBuiltInModel(model)) {
+    return MODEL_META[model];
+  }
+
+  const provider = config.custom_providers.find((item) => item.id === model);
+  return {
+    label: provider?.label || model,
+    provider: provider?.provider || "自定义供应商",
+    accent: "slate",
+    description: "用户手动添加的 OpenAI-compatible 模型供应商。",
+    baseUrlPlaceholder: "https://api.example.com/v1/chat/completions",
+    modelPlaceholder: provider?.model || "model-name",
+  };
+};
+
+export const getModelConfig = (config: AppConfig, model: ModelType): ModelConfig => {
+  if (isBuiltInModel(model)) {
+    return config[model];
+  }
+
+  const provider = config.custom_providers.find((item) => item.id === model);
+  return {
+    base_url: provider?.base_url ?? "",
+    api_key: provider?.api_key ?? "",
+    model: provider?.model ?? "",
+  };
+};
+
+export const getModelChoices = (config: AppConfig, model: ModelType): string[] => {
+  const currentModelName = getModelConfig(config, model).model;
+
+  if (isBuiltInModel(model)) {
+    return Array.from(
+      new Set([
+        ...(MODEL_CATALOG[model] ?? []),
+        ...(config.custom_models?.[model] ?? []),
+        currentModelName,
+      ].filter(Boolean))
+    );
+  }
+
+  const provider = config.custom_providers.find((item) => item.id === model);
+  return Array.from(new Set([...(provider?.custom_models ?? []), currentModelName].filter(Boolean)));
+};
+
+export const updateModelConfig = (
+  config: AppConfig,
+  model: ModelType,
+  patch: Partial<ModelConfig>
+): AppConfig => {
+  if (isBuiltInModel(model)) {
+    return {
+      ...config,
+      [model]: {
+        ...config[model],
+        ...patch,
+      },
+    };
+  }
+
+  return {
+    ...config,
+    custom_providers: config.custom_providers.map((provider) =>
+      provider.id === model ? { ...provider, ...patch } : provider
+    ),
+  };
+};
+
 export const normalizeAppConfig = (
   value:
-    | (Partial<Record<ModelType, Partial<ModelConfig>>> & {
+    | (Partial<Record<BuiltInModelType, Partial<ModelConfig>>> & {
         speech?: Partial<{
           asr: Partial<AsrConfig>;
           tts: Partial<TtsConfig>;
         }>;
         persona?: Partial<PersonaConfig>;
         webdav?: Partial<WebDavConfig>;
-        custom_models?: Partial<Record<ModelType, string[]>>;
+        custom_models?: Partial<Record<BuiltInModelType, string[]>>;
+        custom_providers?: Partial<CustomProviderConfig>[];
       })
     | null
     | undefined
@@ -246,6 +337,23 @@ export const normalizeAppConfig = (
       : [];
   }
 
+  fallback.custom_providers = Array.isArray(value?.custom_providers)
+    ? value.custom_providers.map((provider, index) => {
+        const id = provider.id?.trim() || `custom-${index + 1}`;
+        return {
+          id,
+          label: provider.label?.trim() || id,
+          provider: provider.provider?.trim() || "自定义供应商",
+          base_url: provider.base_url ?? "",
+          api_key: provider.api_key ?? "",
+          model: provider.model ?? "",
+          custom_models: Array.isArray(provider.custom_models)
+            ? Array.from(new Set(provider.custom_models.filter(Boolean)))
+            : [],
+        };
+      })
+    : [];
+
   return fallback;
 };
 
@@ -257,12 +365,8 @@ export const createEmptyConversations = (): Record<ModelType, Conversation[]> =>
   nvidia: [],
 });
 
-export const normalizeModelType = (
-  value: string | null | undefined
-): ModelType => {
-  return MODEL_OPTIONS.some((option) => option.id === value)
-    ? (value as ModelType)
-    : "openai";
+export const normalizeModelType = (value: string | null | undefined): ModelType => {
+  return value?.trim() || "openai";
 };
 
 export const loadConversationsFromStorage = (): Record<ModelType, Conversation[]> => {
@@ -276,9 +380,9 @@ export const loadConversationsFromStorage = (): Record<ModelType, Conversation[]
     const parsed = JSON.parse(raw) as Partial<Record<ModelType, Conversation[]>>;
     const fallback = createEmptyConversations();
 
-    for (const option of MODEL_OPTIONS) {
-      fallback[option.id] = Array.isArray(parsed?.[option.id])
-        ? parsed[option.id]!.map((conversation) => ({
+    for (const [modelId, modelConversations] of Object.entries(parsed ?? {})) {
+      fallback[modelId] = Array.isArray(modelConversations)
+        ? modelConversations.map((conversation) => ({
             ...conversation,
             messages: Array.isArray(conversation.messages)
               ? conversation.messages
@@ -358,8 +462,6 @@ export const isModelConfigured = (
   config: AppConfig,
   model: ModelType
 ): boolean => {
-  const target = config[model];
-  return Boolean(
-    target.base_url.trim() && target.api_key.trim() && target.model.trim()
-  );
+  const target = getModelConfig(config, model);
+  return Boolean(target.base_url.trim() && target.api_key.trim() && target.model.trim());
 };

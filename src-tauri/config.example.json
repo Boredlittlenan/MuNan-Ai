@@ -53,5 +53,6 @@
     "password": "",
     "path": "munan-ai-settings.json"
   },
-  "custom_models": {}
+  "custom_models": {},
+  "custom_providers": []
 }

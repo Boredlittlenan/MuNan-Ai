@@ -22,16 +22,18 @@ import {
   type Conversation,
   type Message,
   type ModelType,
-  MODEL_CATALOG,
-  MODEL_META,
-  MODEL_OPTIONS,
   createEmptyAppConfig,
+  getModelChoices,
+  getModelConfig,
+  getModelMeta,
+  getModelOptions,
   loadConversationsFromStorage,
   loadUserState,
   normalizeAppConfig,
   saveConversationsToStorage,
   saveUserState,
   isModelConfigured,
+  updateModelConfig,
 } from "./modelConfig";
 
 type SynthesizeSpeechResponse = {
@@ -125,9 +127,13 @@ function App() {
    * 用 useMemo 做一次派生，避免 JSX 里反复写查找逻辑。
    */
   const currentModelConversations = useMemo(
-    () => conversations[model],
+    () => conversations[model] ?? [],
     [conversations, model]
   );
+
+  const modelOptions = useMemo(() => getModelOptions(appConfig), [appConfig]);
+  const currentModelMeta = useMemo(() => getModelMeta(appConfig, model), [appConfig, model]);
+  const currentProviderConfig = useMemo(() => getModelConfig(appConfig, model), [appConfig, model]);
 
   const currentConversation = useMemo(
     () =>
@@ -139,11 +145,7 @@ function App() {
   );
 
   const providerModelChoices = useMemo(() => {
-    const builtInModels = MODEL_CATALOG[model] ?? [];
-    const customModels = appConfig.custom_models?.[model] ?? [];
-    const currentModelName = appConfig[model]?.model ?? "";
-
-    return Array.from(new Set([...builtInModels, ...customModels, currentModelName].filter(Boolean)));
+    return getModelChoices(appConfig, model);
   }, [appConfig, model]);
 
   const ttsReady = useMemo(() => {
@@ -248,13 +250,7 @@ function App() {
   const currentModelReady = isModelConfigured(appConfig, model);
 
   const switchProviderModel = async (modelName: string) => {
-    const nextConfig: AppConfig = {
-      ...appConfig,
-      [model]: {
-        ...appConfig[model],
-        model: modelName,
-      },
-    };
+    const nextConfig = updateModelConfig(appConfig, model, { model: modelName });
 
     setAppConfig(nextConfig);
     setConfigError("");
@@ -272,13 +268,13 @@ function App() {
   const createNewConversation = () => {
     const nextConversation: Conversation = {
       id: `${model}-${Date.now()}`,
-      name: `${MODEL_META[model].label} 会话 ${currentModelConversations.length + 1}`,
+      name: `${currentModelMeta.label} 会话 ${currentModelConversations.length + 1}`,
       messages: [],
     };
 
     setConversations((previous) => ({
       ...previous,
-      [model]: [nextConversation, ...previous[model]],
+      [model]: [nextConversation, ...(previous[model] ?? [])],
     }));
     setCurrentConversationId(nextConversation.id);
   };
@@ -308,7 +304,7 @@ function App() {
   const renameConversation = (conversationId: string, name: string) => {
     setConversations((previous) => ({
       ...previous,
-      [model]: previous[model].map((conversation) =>
+      [model]: (previous[model] ?? []).map((conversation) =>
         conversation.id === conversationId
           ? {
               ...conversation,
@@ -339,7 +335,7 @@ function App() {
 
     setConversations((previous) => ({
       ...previous,
-      [model]: previous[model].map((conversation) =>
+      [model]: (previous[model] ?? []).map((conversation) =>
         conversation.id === currentConversation.id
           ? { ...conversation, messages: optimisticMessages }
           : conversation
@@ -362,7 +358,7 @@ function App() {
 
       setConversations((previous) => ({
         ...previous,
-        [model]: previous[model].map((conversation) =>
+        [model]: (previous[model] ?? []).map((conversation) =>
           conversation.id === currentConversation.id
             ? {
                 ...conversation,
@@ -382,7 +378,7 @@ function App() {
     } catch (error) {
       setConversations((previous) => ({
         ...previous,
-        [model]: previous[model].map((conversation) =>
+        [model]: (previous[model] ?? []).map((conversation) =>
           conversation.id === currentConversation.id
             ? {
                 ...conversation,
@@ -435,7 +431,7 @@ function App() {
 
     setConversations((previous) => ({
       ...previous,
-      [model]: previous[model].map((conversation) =>
+      [model]: (previous[model] ?? []).map((conversation) =>
         conversation.id === currentConversationId
           ? {
               ...conversation,
@@ -665,9 +661,9 @@ function App() {
               value={model}
               onChange={(event) => setModel(event.target.value as ModelType)}
             >
-              {MODEL_OPTIONS.map((option) => (
+              {modelOptions.map((option) => (
                 <option key={option.id} value={option.id}>
-                  {MODEL_META[option.id].label} - {MODEL_META[option.id].provider}
+                  {option.label} - {option.provider}
                 </option>
               ))}
             </select>
@@ -678,7 +674,7 @@ function App() {
             <select
               id="chat-provider-model-select"
               className="model-select"
-              value={appConfig[model]?.model ?? ""}
+              value={currentProviderConfig.model}
               disabled={providerModelChoices.length === 0}
               onChange={(event) => void switchProviderModel(event.target.value)}
             >
@@ -691,9 +687,9 @@ function App() {
             </select>
 
             <div className="model-select-summary">
-              <span className="section-badge">{MODEL_META[model].provider}</span>
-              {appConfig[model]?.model && (
-                <span className="section-badge model-name-badge">{appConfig[model].model}</span>
+              <span className="section-badge">{currentModelMeta.provider}</span>
+              {currentProviderConfig.model && (
+                <span className="section-badge model-name-badge">{currentProviderConfig.model}</span>
               )}
               <span className={`status-dot ${currentModelReady ? "is-ready" : "is-missing"}`} />
             </div>
@@ -703,7 +699,7 @@ function App() {
             <div className="section-heading">
               <div>
                 <p className="section-kicker">会话管理</p>
-                <h2>{MODEL_META[model].label} 会话列表</h2>
+                <h2>{currentModelMeta.label} 会话列表</h2>
               </div>
 
               <button type="button" className="primary-button" onClick={createNewConversation}>
@@ -763,8 +759,8 @@ function App() {
           <div className="chat-main__header">
             <div>
               <p className="section-kicker">当前模型</p>
-              <h2>{MODEL_META[model].label}</h2>
-              <p className="chat-main__subtitle">{MODEL_META[model].description}</p>
+              <h2>{currentModelMeta.label}</h2>
+              <p className="chat-main__subtitle">{currentModelMeta.description}</p>
             </div>
 
             <div className="chat-main__summary">
@@ -803,7 +799,7 @@ function App() {
                       message={message}
                       messageKey={messageKey}
                       messageIndex={index}
-                      model={model}
+                      modelLabel={currentModelMeta.label}
                       ttsReady={ttsReady}
                       isSpeaking={isSpeaking}
                       isCopied={copiedMessageKey === messageKey}
@@ -835,7 +831,7 @@ function App() {
             {loading && (
               <div className="chat-line chat-ai">
                 <div className="chat-bubble">
-                  <span className="chat-role">{MODEL_META[model].label}</span>
+                  <span className="chat-role">{currentModelMeta.label}</span>
                   <p>正在整理回复，请稍等...</p>
                 </div>
               </div>

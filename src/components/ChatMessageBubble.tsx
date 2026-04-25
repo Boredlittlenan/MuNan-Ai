@@ -7,7 +7,7 @@ import {
   IoVolumeHigh,
 } from "react-icons/io5";
 
-import { type Message, type ModelType, MODEL_META } from "../modelConfig";
+import { type Message } from "../modelConfig";
 
 export type EditingReplyDraft = {
   messageKey: string;
@@ -19,7 +19,7 @@ type ChatMessageBubbleProps = {
   message: Message;
   messageKey: string;
   messageIndex: number;
-  model: ModelType;
+  modelLabel: string;
   ttsReady: boolean;
   isSpeaking: boolean;
   isOriginalExpanded: boolean;
@@ -38,7 +38,7 @@ export function ChatMessageBubble({
   message,
   messageKey,
   messageIndex,
-  model,
+  modelLabel,
   ttsReady,
   isSpeaking,
   isOriginalExpanded,
@@ -60,7 +60,7 @@ export function ChatMessageBubble({
       <div className={`chat-bubble ${isEditing ? "is-editing" : ""}`}>
         <div className="chat-bubble__topline">
           <span className="chat-role">
-            {message.role === "user" ? "你" : MODEL_META[model].label}
+            {message.role === "user" ? "你" : modelLabel}
           </span>
 
           {isAiReply && (
