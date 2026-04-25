@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import {
   IoAdd,
   IoChatbubbleEllipses,
+  IoClose,
+  IoMenu,
   IoMic,
   IoSettingsSharp,
   IoStopCircleOutline,
@@ -112,6 +114,7 @@ function App() {
   const [recordingState, setRecordingState] = useState<"idle" | "recording" | "transcribing">(
     "idle"
   );
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   /**
    * 聊天区底部锚点，用于每次发送和收到消息后自动滚动到底部。
@@ -277,6 +280,7 @@ function App() {
       [model]: [nextConversation, ...(previous[model] ?? [])],
     }));
     setCurrentConversationId(nextConversation.id);
+    setMobileSidebarOpen(false);
   };
 
   /**
@@ -635,6 +639,15 @@ function App() {
             {currentModelReady ? "当前模型已就绪" : "当前模型待配置"}
           </div>
 
+          <button
+            type="button"
+            className="icon-action mobile-sidebar-toggle"
+            onClick={() => setMobileSidebarOpen(true)}
+            aria-label="打开模型和会话侧边栏"
+          >
+            <IoMenu size={20} />
+          </button>
+
           <Link className="icon-action" to="/settings" aria-label="打开设置页">
             <IoSettingsSharp size={20} />
           </Link>
@@ -643,7 +656,29 @@ function App() {
 
       {/* 页面主区域：左侧为模型和会话，右侧为聊天内容。 */}
       <div className="chat-layout">
-        <aside className="chat-sidebar glass-panel">
+        <button
+          type="button"
+          className={`chat-sidebar-backdrop ${mobileSidebarOpen ? "is-open" : ""}`}
+          onClick={() => setMobileSidebarOpen(false)}
+          aria-label="关闭模型和会话侧边栏"
+        />
+
+        <aside className={`chat-sidebar glass-panel ${mobileSidebarOpen ? "is-open" : ""}`}>
+          <div className="chat-sidebar__mobile-header">
+            <div>
+              <p className="section-kicker">模型与会话</p>
+              <h2>工作区</h2>
+            </div>
+            <button
+              type="button"
+              className="icon-action"
+              onClick={() => setMobileSidebarOpen(false)}
+              aria-label="关闭模型和会话侧边栏"
+            >
+              <IoClose size={20} />
+            </button>
+          </div>
+
           <section className="sidebar-section model-select-section">
             <div className="section-heading">
               <div>
@@ -659,7 +694,10 @@ function App() {
               id="chat-provider-select"
               className="model-select"
               value={model}
-              onChange={(event) => setModel(event.target.value as ModelType)}
+              onChange={(event) => {
+                setModel(event.target.value as ModelType);
+                setMobileSidebarOpen(false);
+              }}
             >
               {modelOptions.map((option) => (
                 <option key={option.id} value={option.id}>
@@ -716,7 +754,10 @@ function App() {
                     className={`conversation-card ${
                       conversation.id === currentConversationId ? "is-active" : ""
                     }`}
-                    onClick={() => setCurrentConversationId(conversation.id)}
+                    onClick={() => {
+                      setCurrentConversationId(conversation.id);
+                      setMobileSidebarOpen(false);
+                    }}
                   >
                     <div className="conversation-card__header">
                       <IoChatbubbleEllipses size={16} />

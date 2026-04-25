@@ -1,105 +1,53 @@
-# Tauri + React + Typescript
+# MuNan AI
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+MuNan AI 是一个基于 Tauri 2 + React + TypeScript + Rust 的桌面端多模型 AI 对话工具。
 
-## Recommended IDE Setup
+## 当前能力
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- 多模型对话：支持 OpenAI、DeepSeek、Qwen、MIMO、NVIDIA 和用户手动添加的 OpenAI-compatible 供应商。
+- 模型配置中心：在设置页维护 Base URL、API Key、模型名、自定义模型和默认模型。
+- 语音能力：支持 ASR 语音输入和 TTS 回复朗读；ASR 支持 OpenAI-like/MIMO 与腾讯云一句话识别。
+- AI 人设与 TTS 引导：可在设置页编辑后台人设，AI 回复会拆成用户可见文本和 TTS 朗读文本。
+- 配置备份：支持本地 JSON 和 WebDAV 导入/导出。
+- 响应式 UI：PC、平板、手机均已适配；手机端聊天页使用可折叠模型/会话侧边栏，消息区独立滚动，输入区固定在底部。
 
-## 环境搭建
+## 开发运行
 
-1. **安装 Node.js 和 pnpm**
-   - [Node.js 下载](https://nodejs.org/)
-   - 安装 pnpm：
+```bash
+pnpm install
+pnpm tauri dev
+```
 
-     ```bash
-     npm install -g pnpm
-     ```
+只跑前端构建检查：
 
-2. **安装 Rust 开发环境**
-   - 安装 Rust：
+```bash
+pnpm build
+```
 
-     ```bash
-     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-     ```
+Rust 检查：
 
-   - 配置环境变量：
+```bash
+cd src-tauri
+cargo check
+cargo fmt --check
+```
 
-     ```bash
-     
-     source $HOME/.cargo/env
-     ```
+## 配置文件
 
-   - 验证安装：
+配置模板在 `src-tauri/config.example.json`。真实密钥请放在本地配置文件中，不要提交：
 
-     ```bash
-     rustc --version
-     ```
+- `src-tauri/config.local.json`
+- `src-tauri/config.json`
 
-3. **安装 Tauri CLI**
-   - 安装 Tauri CLI：
+后端读取配置时优先使用 `config.local.json`。
 
-     ```bash
-     cargo install tauri-cli
-     ```
+## 文档
 
-## 项目依赖安装
+- `docs/AI_HANDOFF.md`：主要技术说明，适合后续 AI 或开发者快速接手。
+- `docs/ARCHITECTURE.md`：简版架构索引。
 
-1. **克隆项目**
+## 注意
 
-   ```bash
-   git clone <repository-url>
-   cd <project-directory>
-   ```
-
-2. **安装依赖**
-
-   ```bash
-   pnpm install
-   ```
-
-3. **引入图标库**
-
-   ```bash
-   pnpm add react-icons
-   ```
-
-## 开发环境运行
-
-1. **启动开发服务器**
-
-   ```bash
-   pnpm tauri dev
-   ```
-
-2. **访问应用**
-   - 根据终端输出的地址，打开浏览器访问。
-
-## 构建与部署
-
-1. **构建应用**
-
-   ```bash
-   pnpm tauri build
-   ```
-
-2. **生成的文件**
-   - 构建完成后，生成的安装包位于 `src-tauri/target/release/bundle` 目录下。
-
-3. **部署应用**
-   - 将生成的安装包分发给用户，用户安装后即可运行。
-
-## 常见问题
-
-1. **Rust 版本过低**
-   - 更新 Rust：
-
-     ```bash
-     rustup update
-     ```
-
-2. **依赖安装失败**
-   - 确保网络畅通，或者使用代理。
-
-3. **构建失败**
-   - 检查 `src-tauri/tauri.conf.json` 配置是否正确。
+- `dist/`、`node_modules/`、`src-tauri/target/` 是生成目录。
+- 导出的配置备份可能包含模型密钥，适合个人备份，不要提交到 Git。
+- WebDAV 配置只保存在本机配置中，不会写入导出的备份 JSON。
