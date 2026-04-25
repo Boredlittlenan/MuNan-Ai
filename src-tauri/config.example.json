@@ -47,5 +47,11 @@
   "persona": {
     "prompt": "你是 MuNan AI，一个温和、清晰、可靠的桌面 AI 助手。你会优先理解用户真实意图，回答时直接、有条理，并在需要时给出可执行步骤。"
   },
+  "webdav": {
+    "url": "",
+    "username": "",
+    "password": "",
+    "path": "munan-ai-settings.json"
+  },
   "custom_models": {}
 }

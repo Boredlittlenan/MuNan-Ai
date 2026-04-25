@@ -6,14 +6,24 @@ import {
   IoCheckmarkCircle,
   IoCloudUploadOutline,
   IoDownloadOutline,
+  IoEyeOffOutline,
+  IoEyeOutline,
   IoInformationCircleOutline,
   IoRefresh,
   IoSave,
+  IoServerOutline,
 } from "react-icons/io5";
 
 import "./styles/base.css";
 import "./styles/Settings.css";
 
+import {
+  exportAppConfigBackup,
+  exportAppConfigToWebDav,
+  importAppConfigFromWebDav,
+  readConfigBackup,
+  revealConfigBackup,
+} from "./settings/configBackup";
 import {
   type AppConfig,
   type AsrProvider,
@@ -71,6 +81,10 @@ function Settings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [exportedConfigPath, setExportedConfigPath] = useState("");
+  const [transferDialog, setTransferDialog] = useState<"export" | "import" | null>(null);
+  const [webDavDialogOpen, setWebDavDialogOpen] = useState(false);
+  const [visiblePasswordFields, setVisiblePasswordFields] = useState<string[]>([]);
   const [customModelName, setCustomModelName] = useState("");
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -163,6 +177,32 @@ function Settings() {
     }));
   };
 
+  const updateWebDavField = (
+    field: "url" | "username" | "password" | "path",
+    value: string
+  ) => {
+    setConfig((previous) => ({
+      ...previous,
+      webdav: {
+        ...previous.webdav,
+        [field]: value,
+      },
+    }));
+  };
+
+  const isPasswordVisible = (field: string) => visiblePasswordFields.includes(field);
+
+  const togglePasswordVisibility = (field: string) => {
+    setVisiblePasswordFields((current) =>
+      current.includes(field)
+        ? current.filter((item) => item !== field)
+        : [...current, field]
+    );
+  };
+
+  const passwordInputType = (field: string) =>
+    isPasswordVisible(field) ? "text" : "password";
+
   const switchAsrProvider = (provider: AsrProvider) => {
     setConfig((previous) => ({
       ...previous,
@@ -192,6 +232,7 @@ function Settings() {
         model: "",
       },
     }));
+    setExportedConfigPath("");
     setMessage(`${MODEL_META[selectedModel].label} 配置已清空，保存后才会写入文件。`);
   };
 
@@ -222,6 +263,7 @@ function Settings() {
 
     setCustomModelName("");
     setError("");
+    setExportedConfigPath("");
     setMessage(`${MODEL_META[selectedModel].label} 已添加自定义模型，保存后写入配置文件。`);
   };
 
@@ -233,6 +275,7 @@ function Settings() {
     setSaving(true);
     setError("");
     setMessage("");
+    setExportedConfigPath("");
 
     try {
       await invoke("save_app_config", { config });
@@ -245,24 +288,48 @@ function Settings() {
     }
   };
 
-  const exportSettings = () => {
-    const content = JSON.stringify(config, null, 2);
-    const blob = new Blob([content], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const exportSettingsToLocal = async () => {
+    try {
+      const exportPath = await exportAppConfigBackup(config);
+      setExportedConfigPath(exportPath);
+      setError("");
+      setMessage("配置已导出为 JSON 备份文件。");
+      setTransferDialog(null);
+    } catch (exportError) {
+      setExportedConfigPath("");
+      setMessage("");
+      setError(`配置导出失败：${String(exportError)}`);
+    }
+  };
 
-    anchor.href = url;
-    anchor.download = `munan-ai-settings-${timestamp}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-    setError("");
-    setMessage("配置已导出为 JSON 备份文件。");
+  const exportSettingsToWebDav = async () => {
+    try {
+      await exportAppConfigToWebDav(config);
+      setExportedConfigPath("");
+      setError("");
+      setMessage("配置已导出到 WebDAV。");
+      setTransferDialog(null);
+    } catch (exportError) {
+      setExportedConfigPath("");
+      setMessage("");
+      setError(`WebDAV 导出失败：${String(exportError)}`);
+    }
+  };
+
+  const openExportedConfigDir = async () => {
+    if (!exportedConfigPath) {
+      return;
+    }
+
+    try {
+      await revealConfigBackup(exportedConfigPath);
+    } catch (openError) {
+      setError(`打开导出目录失败：${String(openError)}`);
+    }
   };
 
   const requestImportSettings = () => {
+    setTransferDialog(null);
     importInputRef.current?.click();
   };
 
@@ -272,9 +339,12 @@ function Settings() {
     }
 
     try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as Partial<AppConfig>;
-      setConfig(normalizeAppConfig(parsed));
+      const importedConfig = await readConfigBackup(file);
+      setConfig((previous) => ({
+        ...importedConfig,
+        webdav: previous.webdav,
+      }));
+      setExportedConfigPath("");
       setError("");
       setMessage("配置已导入到表单。确认无误后点击“保存设置”写入配置文件。");
     } catch (importError) {
@@ -287,6 +357,23 @@ function Settings() {
     }
   };
 
+  const importSettingsFromWebDav = async () => {
+    try {
+      const importedConfig = normalizeAppConfig(await importAppConfigFromWebDav(config));
+      setConfig((previous) => ({
+        ...importedConfig,
+        webdav: previous.webdav,
+      }));
+      setExportedConfigPath("");
+      setError("");
+      setMessage("已从 WebDAV 导入配置到表单。确认无误后点击“保存设置”写入配置文件。");
+      setTransferDialog(null);
+    } catch (importError) {
+      setMessage("");
+      setError(`WebDAV 导入失败：${String(importError)}`);
+    }
+  };
+
   /**
    * 当用户怀疑表单和磁盘内容不一致时，可以重新从后端拉取。
    */
@@ -294,6 +381,7 @@ function Settings() {
     setLoading(true);
     setError("");
     setMessage("");
+    setExportedConfigPath("");
 
     try {
       const latestConfig = await invoke<AppConfig>("load_app_config");
@@ -334,12 +422,17 @@ function Settings() {
             onChange={(event) => void importSettings(event.target.files?.[0])}
           />
 
-          <button type="button" className="ghost-button" onClick={exportSettings}>
+          <button type="button" className="ghost-button" onClick={() => setWebDavDialogOpen(true)}>
+            <IoServerOutline size={18} />
+            WebDAV 配置
+          </button>
+
+          <button type="button" className="ghost-button" onClick={() => setTransferDialog("export")}>
             <IoDownloadOutline size={18} />
             导出设置
           </button>
 
-          <button type="button" className="ghost-button" onClick={requestImportSettings}>
+          <button type="button" className="ghost-button" onClick={() => setTransferDialog("import")}>
             <IoCloudUploadOutline size={18} />
             导入设置
           </button>
@@ -361,7 +454,16 @@ function Settings() {
       {message && (
         <div className="alert-banner alert-banner--success">
           <IoCheckmarkCircle size={18} />
-          {message}
+          <span>{message}</span>
+          {exportedConfigPath && (
+            <button
+              type="button"
+              className="alert-action-button"
+              onClick={() => void openExportedConfigDir()}
+            >
+              打开文件所在目录
+            </button>
+          )}
         </div>
       )}
 
@@ -467,14 +569,29 @@ function Settings() {
 
               <div className="settings-field">
                 <label htmlFor="api-key">API Key</label>
-                <input
-                  id="api-key"
-                  className="settings-input"
-                  type="password"
-                  value={selectedConfig.api_key}
-                  placeholder="请输入该模型对应的 API Key"
-                  onChange={(event) => updateSelectedModelField("api_key", event.target.value)}
-                />
+                <div className="password-input-row">
+                  <input
+                    id="api-key"
+                    className="settings-input"
+                    type={passwordInputType("model-api-key")}
+                    value={selectedConfig.api_key}
+                    placeholder="请输入该模型对应的 API Key"
+                    onChange={(event) => updateSelectedModelField("api_key", event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle-button"
+                    onClick={() => togglePasswordVisibility("model-api-key")}
+                    aria-label={isPasswordVisible("model-api-key") ? "隐藏 API Key" : "显示 API Key"}
+                    title={isPasswordVisible("model-api-key") ? "隐藏" : "显示"}
+                  >
+                    {isPasswordVisible("model-api-key") ? (
+                      <IoEyeOffOutline size={17} />
+                    ) : (
+                      <IoEyeOutline size={17} />
+                    )}
+                  </button>
+                </div>
                 <p className="settings-help-text">
                   已改为密码输入框，避免在桌面环境里直接把密钥裸露在页面上。
                 </p>
@@ -579,28 +696,58 @@ function Settings() {
                       />
 
                       <label htmlFor="asr-secret-id-current">SecretId</label>
-                      <input
-                        id="asr-secret-id-current"
-                        className="settings-input"
-                        type="password"
-                        value={config.speech.asr.secret_id}
-                        placeholder="请输入腾讯云 SecretId"
-                        onChange={(event) =>
-                          updateSpeechField("asr", "secret_id", event.target.value)
-                        }
-                      />
+                      <div className="password-input-row">
+                        <input
+                          id="asr-secret-id-current"
+                          className="settings-input"
+                          type={passwordInputType("asr-secret-id")}
+                          value={config.speech.asr.secret_id}
+                          placeholder="请输入腾讯云 SecretId"
+                          onChange={(event) =>
+                            updateSpeechField("asr", "secret_id", event.target.value)
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="password-toggle-button"
+                          onClick={() => togglePasswordVisibility("asr-secret-id")}
+                          aria-label={isPasswordVisible("asr-secret-id") ? "隐藏 SecretId" : "显示 SecretId"}
+                          title={isPasswordVisible("asr-secret-id") ? "隐藏" : "显示"}
+                        >
+                          {isPasswordVisible("asr-secret-id") ? (
+                            <IoEyeOffOutline size={17} />
+                          ) : (
+                            <IoEyeOutline size={17} />
+                          )}
+                        </button>
+                      </div>
 
                       <label htmlFor="asr-secret-key-current">SecretKey</label>
-                      <input
-                        id="asr-secret-key-current"
-                        className="settings-input"
-                        type="password"
-                        value={config.speech.asr.secret_key}
-                        placeholder="请输入腾讯云 SecretKey"
-                        onChange={(event) =>
-                          updateSpeechField("asr", "secret_key", event.target.value)
-                        }
-                      />
+                      <div className="password-input-row">
+                        <input
+                          id="asr-secret-key-current"
+                          className="settings-input"
+                          type={passwordInputType("asr-secret-key")}
+                          value={config.speech.asr.secret_key}
+                          placeholder="请输入腾讯云 SecretKey"
+                          onChange={(event) =>
+                            updateSpeechField("asr", "secret_key", event.target.value)
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="password-toggle-button"
+                          onClick={() => togglePasswordVisibility("asr-secret-key")}
+                          aria-label={isPasswordVisible("asr-secret-key") ? "隐藏 SecretKey" : "显示 SecretKey"}
+                          title={isPasswordVisible("asr-secret-key") ? "隐藏" : "显示"}
+                        >
+                          {isPasswordVisible("asr-secret-key") ? (
+                            <IoEyeOffOutline size={17} />
+                          ) : (
+                            <IoEyeOutline size={17} />
+                          )}
+                        </button>
+                      </div>
 
                       <label htmlFor="asr-region-current">地域</label>
                       <input
@@ -649,16 +796,31 @@ function Settings() {
                       />
 
                       <label htmlFor="asr-api-key-current">API Key</label>
-                      <input
-                        id="asr-api-key-current"
-                        className="settings-input"
-                        type="password"
-                        value={config.speech.asr.api_key}
-                        placeholder="请输入 ASR 服务 API Key"
-                        onChange={(event) =>
-                          updateSpeechField("asr", "api_key", event.target.value)
-                        }
-                      />
+                      <div className="password-input-row">
+                        <input
+                          id="asr-api-key-current"
+                          className="settings-input"
+                          type={passwordInputType("asr-api-key")}
+                          value={config.speech.asr.api_key}
+                          placeholder="请输入 ASR 服务 API Key"
+                          onChange={(event) =>
+                            updateSpeechField("asr", "api_key", event.target.value)
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="password-toggle-button"
+                          onClick={() => togglePasswordVisibility("asr-api-key")}
+                          aria-label={isPasswordVisible("asr-api-key") ? "隐藏 ASR API Key" : "显示 ASR API Key"}
+                          title={isPasswordVisible("asr-api-key") ? "隐藏" : "显示"}
+                        >
+                          {isPasswordVisible("asr-api-key") ? (
+                            <IoEyeOffOutline size={17} />
+                          ) : (
+                            <IoEyeOutline size={17} />
+                          )}
+                        </button>
+                      </div>
 
                       <label htmlFor="asr-model-current">模型名称</label>
                       <input
@@ -692,14 +854,29 @@ function Settings() {
                   />
 
                   <label htmlFor="tts-api-key">API Key</label>
-                  <input
-                    id="tts-api-key"
-                    className="settings-input"
-                    type="password"
-                    value={config.speech.tts.api_key}
-                    placeholder="请输入 TTS 服务 API Key"
-                    onChange={(event) => updateSpeechField("tts", "api_key", event.target.value)}
-                  />
+                  <div className="password-input-row">
+                    <input
+                      id="tts-api-key"
+                      className="settings-input"
+                      type={passwordInputType("tts-api-key")}
+                      value={config.speech.tts.api_key}
+                      placeholder="请输入 TTS 服务 API Key"
+                      onChange={(event) => updateSpeechField("tts", "api_key", event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="password-toggle-button"
+                      onClick={() => togglePasswordVisibility("tts-api-key")}
+                      aria-label={isPasswordVisible("tts-api-key") ? "隐藏 TTS API Key" : "显示 TTS API Key"}
+                      title={isPasswordVisible("tts-api-key") ? "隐藏" : "显示"}
+                    >
+                      {isPasswordVisible("tts-api-key") ? (
+                        <IoEyeOffOutline size={17} />
+                      ) : (
+                        <IoEyeOutline size={17} />
+                      )}
+                    </button>
+                  </div>
 
                   <label htmlFor="tts-model">模型名称</label>
                   <input
@@ -769,6 +946,147 @@ function Settings() {
           )}
         </main>
       </div>
+
+      {transferDialog && (
+        <div className="settings-modal-backdrop" role="presentation">
+          <div className="settings-modal" role="dialog" aria-modal="true">
+            <div>
+              <p className="section-kicker">
+                {transferDialog === "export" ? "Export" : "Import"}
+              </p>
+              <h2>{transferDialog === "export" ? "选择导出位置" : "选择导入来源"}</h2>
+              <p className="settings-help-text">
+                备份内容不会包含 WebDAV 配置，避免同步凭据被写进备份文件。
+              </p>
+            </div>
+
+            <div className="settings-modal-actions">
+              {transferDialog === "export" ? (
+                <>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => void exportSettingsToLocal()}
+                  >
+                    本地 Downloads
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => void exportSettingsToWebDav()}
+                  >
+                    WebDAV
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="ghost-button" onClick={requestImportSettings}>
+                    本地 JSON
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => void importSettingsFromWebDav()}
+                  >
+                    WebDAV
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div className="settings-modal-footer">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setTransferDialog(null)}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {webDavDialogOpen && (
+        <div className="settings-modal-backdrop" role="presentation">
+          <div className="settings-modal settings-modal--wide" role="dialog" aria-modal="true">
+            <div>
+              <p className="section-kicker">WebDAV</p>
+              <h2>WebDAV 配置</h2>
+              <p className="settings-help-text">
+                WebDAV 配置只保存在本机配置中，不会出现在导入/导出的备份内容里。
+              </p>
+            </div>
+
+            <div className="settings-modal-form">
+              <label htmlFor="webdav-url">WebDAV 地址</label>
+              <input
+                id="webdav-url"
+                className="settings-input"
+                type="text"
+                value={config.webdav.url}
+                placeholder="例如 https://example.com/dav/backups"
+                onChange={(event) => updateWebDavField("url", event.target.value)}
+              />
+
+              <label htmlFor="webdav-path">备份文件路径</label>
+              <input
+                id="webdav-path"
+                className="settings-input"
+                type="text"
+                value={config.webdav.path}
+                placeholder="munan-ai-settings.json"
+                onChange={(event) => updateWebDavField("path", event.target.value)}
+              />
+
+              <label htmlFor="webdav-username">用户名</label>
+              <input
+                id="webdav-username"
+                className="settings-input"
+                type="text"
+                value={config.webdav.username}
+                placeholder="WebDAV 用户名，可留空"
+                onChange={(event) => updateWebDavField("username", event.target.value)}
+              />
+
+              <label htmlFor="webdav-password">密码</label>
+              <div className="password-input-row">
+                <input
+                  id="webdav-password"
+                  className="settings-input"
+                  type={passwordInputType("webdav-password")}
+                  value={config.webdav.password}
+                  placeholder="WebDAV 密码或应用专用密码"
+                  onChange={(event) => updateWebDavField("password", event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="password-toggle-button"
+                  onClick={() => togglePasswordVisibility("webdav-password")}
+                  aria-label={isPasswordVisible("webdav-password") ? "隐藏 WebDAV 密码" : "显示 WebDAV 密码"}
+                  title={isPasswordVisible("webdav-password") ? "隐藏" : "显示"}
+                >
+                  {isPasswordVisible("webdav-password") ? (
+                    <IoEyeOffOutline size={17} />
+                  ) : (
+                    <IoEyeOutline size={17} />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="settings-modal-footer">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setWebDavDialogOpen(false)}
+              >
+                完成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -99,6 +99,22 @@ fn default_persona_prompt() -> String {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct WebDavConfig {
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default = "default_webdav_path")]
+    pub path: String,
+}
+
+fn default_webdav_path() -> String {
+    "munan-ai-settings.json".into()
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct AppConfig {
     #[serde(default)]
     pub openai: ModelConfig,
@@ -114,6 +130,8 @@ pub struct AppConfig {
     pub speech: SpeechConfig,
     #[serde(default)]
     pub persona: PersonaConfig,
+    #[serde(default)]
+    pub webdav: WebDavConfig,
     #[serde(default)]
     pub custom_models: HashMap<String, Vec<String>>,
 }

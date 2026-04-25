@@ -4,19 +4,19 @@ import { Link } from "react-router-dom";
 import {
   IoAdd,
   IoChatbubbleEllipses,
-  IoCopyOutline,
-  IoCreateOutline,
-  IoEyeOutline,
   IoMic,
-  IoSaveOutline,
   IoSettingsSharp,
   IoStopCircleOutline,
-  IoVolumeHigh,
 } from "react-icons/io5";
 
 import "./styles/base.css";
 import "./styles/App.css";
 
+import { recordedBlobToWavBase64 } from "./audio/recording";
+import {
+  ChatMessageBubble,
+  type EditingReplyDraft,
+} from "./components/ChatMessageBubble";
 import {
   type AppConfig,
   type Conversation,
@@ -47,95 +47,6 @@ type ChatReplyResponse = {
   content: string;
   tts_text: string;
   original_content: string;
-};
-
-type EditingReplyDraft = {
-  messageKey: string;
-  content: string;
-  ttsText: string;
-};
-
-const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-
-  for (let index = 0; index < bytes.byteLength; index += 1) {
-    binary += String.fromCharCode(bytes[index]);
-  }
-
-  return window.btoa(binary);
-};
-
-const encodeAudioBufferToWav = (audioBuffer: AudioBuffer): ArrayBuffer => {
-  const numberOfChannels = audioBuffer.numberOfChannels;
-  const sampleRate = audioBuffer.sampleRate;
-  const bytesPerSample = 2;
-  const blockAlign = numberOfChannels * bytesPerSample;
-  const dataLength = audioBuffer.length * blockAlign;
-  const buffer = new ArrayBuffer(44 + dataLength);
-  const view = new DataView(buffer);
-  let offset = 0;
-
-  const writeString = (value: string) => {
-    for (let index = 0; index < value.length; index += 1) {
-      view.setUint8(offset, value.charCodeAt(index));
-      offset += 1;
-    }
-  };
-
-  writeString("RIFF");
-  view.setUint32(offset, 36 + dataLength, true);
-  offset += 4;
-  writeString("WAVE");
-  writeString("fmt ");
-  view.setUint32(offset, 16, true);
-  offset += 4;
-  view.setUint16(offset, 1, true);
-  offset += 2;
-  view.setUint16(offset, numberOfChannels, true);
-  offset += 2;
-  view.setUint32(offset, sampleRate, true);
-  offset += 4;
-  view.setUint32(offset, sampleRate * blockAlign, true);
-  offset += 4;
-  view.setUint16(offset, blockAlign, true);
-  offset += 2;
-  view.setUint16(offset, bytesPerSample * 8, true);
-  offset += 2;
-  writeString("data");
-  view.setUint32(offset, dataLength, true);
-  offset += 4;
-
-  for (let sampleIndex = 0; sampleIndex < audioBuffer.length; sampleIndex += 1) {
-    for (let channel = 0; channel < numberOfChannels; channel += 1) {
-      const sample = Math.max(-1, Math.min(1, audioBuffer.getChannelData(channel)[sampleIndex]));
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-      offset += 2;
-    }
-  }
-
-  return buffer;
-};
-
-const recordedBlobToWavBase64 = async (blob: Blob): Promise<string> => {
-  const AudioContextCtor =
-    window.AudioContext ??
-    (window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext })
-      .webkitAudioContext;
-
-  if (!AudioContextCtor) {
-    throw new Error("当前 WebView 不支持音频解码。");
-  }
-
-  const audioContext = new AudioContextCtor();
-
-  try {
-    const sourceBuffer = await blob.arrayBuffer();
-    const audioBuffer = await audioContext.decodeAudioData(sourceBuffer.slice(0));
-    return arrayBufferToBase64(encodeAudioBufferToWav(audioBuffer));
-  } finally {
-    void audioContext.close();
-  }
 };
 
 /* =========================
@@ -511,7 +422,7 @@ function App() {
     setEditingReply(null);
   };
 
-  const saveEditedReply = (conversationId: string, messageIndex: number) => {
+  const saveEditedReply = (messageIndex: number) => {
     if (!editingReply) {
       return;
     }
@@ -525,7 +436,7 @@ function App() {
     setConversations((previous) => ({
       ...previous,
       [model]: previous[model].map((conversation) =>
-        conversation.id === conversationId
+        conversation.id === currentConversationId
           ? {
               ...conversation,
               messages: conversation.messages.map((message, index) =>
@@ -884,132 +795,28 @@ function App() {
               currentConversation.messages.length > 0 ? (
                 currentConversation.messages.map((message, index) => {
                   const messageKey = `${currentConversation.id}-${message.role}-${index}`;
-                  const isAiReply = message.role === "ai";
                   const isSpeaking = speakingMessageKey === messageKey;
 
                   return (
-                    <div
+                    <ChatMessageBubble
                       key={messageKey}
-                      className={`chat-line ${message.role === "user" ? "chat-user" : "chat-ai"}`}
-                    >
-                      <div
-                        className={`chat-bubble ${
-                          editingReply?.messageKey === messageKey ? "is-editing" : ""
-                        }`}
-                      >
-                        <div className="chat-bubble__topline">
-                          <span className="chat-role">
-                            {message.role === "user" ? "你" : MODEL_META[model].label}
-                          </span>
-
-                          {isAiReply && (
-                            <div className="chat-message-actions">
-                              <button
-                                type="button"
-                                className="chat-message-action"
-                                title={copiedMessageKey === messageKey ? "已复制" : "复制回复"}
-                                aria-label="复制回复"
-                                onClick={() => void copyReply(message.content, messageKey)}
-                              >
-                                <IoCopyOutline size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                className="chat-message-action"
-                                title="显示原文"
-                                aria-label="显示原文"
-                                onClick={() => toggleOriginal(messageKey)}
-                              >
-                                <IoEyeOutline size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                className="chat-message-action"
-                                title="编辑回复"
-                                aria-label="编辑回复"
-                                onClick={() => startEditReply(message, messageKey)}
-                              >
-                                <IoCreateOutline size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                className="chat-message-action"
-                                title={isSpeaking ? "停止朗读" : "朗读回复"}
-                                aria-label={isSpeaking ? "停止朗读" : "朗读回复"}
-                                disabled={!ttsReady && !isSpeaking}
-                                onClick={() => void speakReply(message, messageKey)}
-                              >
-                                {isSpeaking ? (
-                                  <IoStopCircleOutline size={17} />
-                                ) : (
-                                  <IoVolumeHigh size={17} />
-                                )}
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        {editingReply?.messageKey === messageKey ? (
-                          <div className="reply-editor">
-                            <label htmlFor={`${messageKey}-content`}>显示文本</label>
-                            <textarea
-                              id={`${messageKey}-content`}
-                              className="reply-editor__textarea"
-                              value={editingReply.content}
-                              onChange={(event) =>
-                                setEditingReply((current) =>
-                                  current
-                                    ? { ...current, content: event.target.value }
-                                    : current
-                                )
-                              }
-                            />
-
-                            <label htmlFor={`${messageKey}-tts`}>朗读文本</label>
-                            <textarea
-                              id={`${messageKey}-tts`}
-                              className="reply-editor__textarea"
-                              value={editingReply.ttsText}
-                              placeholder="可添加 (温柔 平静)、[轻笑]、[停顿] 等标签；留空时朗读显示文本。"
-                              onChange={(event) =>
-                                setEditingReply((current) =>
-                                  current
-                                    ? { ...current, ttsText: event.target.value }
-                                    : current
-                                )
-                              }
-                            />
-
-                            <div className="reply-editor__actions">
-                              <button
-                                type="button"
-                                className="ghost-button"
-                                onClick={cancelEditReply}
-                              >
-                                取消
-                              </button>
-                              <button
-                                type="button"
-                                className="primary-button"
-                                onClick={() =>
-                                  saveEditedReply(currentConversation.id, index)
-                                }
-                              >
-                                <IoSaveOutline size={16} />
-                                保存
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <p>{message.content}</p>
-                        )}
-                        {isAiReply && expandedOriginalKeys.includes(messageKey) && (
-                          <div className="original-reply-panel">
-                            <span>原文</span>
-                            <p>{message.original_content ?? message.content}</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                      message={message}
+                      messageKey={messageKey}
+                      messageIndex={index}
+                      model={model}
+                      ttsReady={ttsReady}
+                      isSpeaking={isSpeaking}
+                      isCopied={copiedMessageKey === messageKey}
+                      isOriginalExpanded={expandedOriginalKeys.includes(messageKey)}
+                      editingReply={editingReply}
+                      onCopy={(content, key) => void copyReply(content, key)}
+                      onToggleOriginal={toggleOriginal}
+                      onStartEdit={startEditReply}
+                      onEditChange={setEditingReply}
+                      onCancelEdit={cancelEditReply}
+                      onSaveEdit={saveEditedReply}
+                      onSpeak={(targetMessage, key) => void speakReply(targetMessage, key)}
+                    />
                   );
                 })
               ) : (

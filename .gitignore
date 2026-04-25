@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.codex/
 
 # Local runtime configuration and secrets
 src-tauri/config.json

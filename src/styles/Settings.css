@@ -19,6 +19,22 @@
   display: none;
 }
 
+.alert-action-button {
+  margin-left: auto;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 10px;
+  color: var(--emerald);
+  font-size: 12px;
+  font-weight: 750;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(21, 150, 109, 0.2);
+}
+
+.alert-action-button:hover {
+  background: #fff;
+}
+
 .back-button {
   flex-shrink: 0;
 }
@@ -160,9 +176,37 @@
 }
 
 .settings-input {
+  width: 100%;
   min-height: var(--control-height);
   padding: 0 12px;
   border-radius: 12px;
+}
+
+.password-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+  align-items: center;
+}
+
+.password-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  min-width: 42px;
+  min-height: var(--control-height);
+  padding: 0;
+  border-radius: 12px;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--line-soft);
+}
+
+.password-toggle-button:hover {
+  color: var(--sky);
+  background: #fff;
+  border-color: rgba(29, 114, 243, 0.24);
 }
 
 .settings-textarea {
@@ -222,6 +266,60 @@
 
 .persona-textarea {
   min-height: 150px;
+}
+
+.settings-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(21, 31, 48, 0.34);
+}
+
+.settings-modal {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.84);
+  box-shadow: var(--shadow-panel);
+}
+
+.settings-modal--wide {
+  width: min(560px, 100%);
+}
+
+.settings-modal h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.settings-modal-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-modal-form label {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-modal-footer {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .speech-settings-grid {

@@ -14,16 +14,14 @@ pub struct ChatReply {
 #[tauri::command]
 pub async fn chat_with_ai(messages: Vec<ChatMessage>, model: String) -> Result<ChatReply, String> {
     let config = load_config()?;
-    let guided_messages = with_response_guidance(messages, config.persona.prompt.clone());
+    let guided_messages = with_response_guidance(messages, config.persona.prompt);
 
     let reply = match model.as_str() {
-        "openai" => crate::ai::openai::call_openai(guided_messages.clone(), config.openai).await,
-        "deepseek" => {
-            crate::ai::deepseek::call_deepseek(guided_messages.clone(), config.deepseek).await
-        }
-        "qwen" => crate::ai::qwen::call_qwen(guided_messages.clone(), config.qwen).await,
-        "mimo" => crate::ai::mimo::call_mimo(guided_messages.clone(), config.mimo).await,
-        "nvidia" => crate::ai::nvidia::call_nvidia(guided_messages.clone(), config.nvidia).await,
+        "openai" => crate::ai::openai::call_openai(guided_messages, config.openai).await,
+        "deepseek" => crate::ai::deepseek::call_deepseek(guided_messages, config.deepseek).await,
+        "qwen" => crate::ai::qwen::call_qwen(guided_messages, config.qwen).await,
+        "mimo" => crate::ai::mimo::call_mimo(guided_messages, config.mimo).await,
+        "nvidia" => crate::ai::nvidia::call_nvidia(guided_messages, config.nvidia).await,
         _ => Err(format!("未知模型: {}", model)),
     }?;
 

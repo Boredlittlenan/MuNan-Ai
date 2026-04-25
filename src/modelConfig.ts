@@ -8,7 +8,7 @@ export const MODEL_OPTIONS = [
   { id: "deepseek", label: "DeepSeek", provider: "深度求索", accent: "emerald" },
   { id: "qwen", label: "Qwen", provider: "通义千问", accent: "amber" },
   { id: "mimo", label: "MIMO", provider: "小米大模型", accent: "rose" },
-  { id: "nvidia", label: "NVIDIA", provider: "Kimi / NIM", accent: "violet" },
+  { id: "nvidia", label: "NVIDIA", provider: "nvidia开放平台", accent: "violet" },
 ] as const;
 
 export type ModelType = (typeof MODEL_OPTIONS)[number]["id"];
@@ -57,9 +57,17 @@ export type PersonaConfig = {
   prompt: string;
 };
 
+export type WebDavConfig = {
+  url: string;
+  username: string;
+  password: string;
+  path: string;
+};
+
 export type AppConfig = Record<ModelType, ModelConfig> & {
   speech: SpeechConfig;
   persona: PersonaConfig;
+  webdav: WebDavConfig;
   custom_models: Record<ModelType, string[]>;
 };
 
@@ -70,9 +78,6 @@ export const MODEL_CATALOG: Record<ModelType, string[]> = {
   mimo: ["mimo-v2-flash"],
   nvidia: [
     "moonshotai/kimi-k2.5",
-    "nvidia/llama-3.1-nemotron-ultra-253b-v1",
-    "meta/llama-3.1-405b-instruct",
-    "mistralai/mixtral-8x22b-instruct-v0.1",
   ],
 };
 
@@ -122,7 +127,7 @@ export const MODEL_META: Record<
   },
   nvidia: {
     label: "NVIDIA",
-    provider: "NIM / Kimi",
+    provider: "NVIDIA 开放平台",
     accent: "violet",
     description: "可以接 NVIDIA 集成服务，适合扩展第三方兼容模型。",
     baseUrlPlaceholder: "https://integrate.api.nvidia.com/v1/chat/completions",
@@ -162,6 +167,12 @@ export const createEmptyAppConfig = (): AppConfig => ({
     prompt:
       "你是 MuNan AI，一个温和、清晰、可靠的桌面 AI 助手。你会优先理解用户真实意图，回答时直接、有条理，并在需要时给出可执行步骤。",
   },
+  webdav: {
+    url: "",
+    username: "",
+    password: "",
+    path: "munan-ai-settings.json",
+  },
   custom_models: {
     openai: [],
     deepseek: [],
@@ -182,6 +193,7 @@ export const normalizeAppConfig = (
           tts: Partial<TtsConfig>;
         }>;
         persona?: Partial<PersonaConfig>;
+        webdav?: Partial<WebDavConfig>;
         custom_models?: Partial<Record<ModelType, string[]>>;
       })
     | null
@@ -220,6 +232,12 @@ export const normalizeAppConfig = (
   };
   fallback.persona = {
     prompt: value?.persona?.prompt ?? fallback.persona.prompt,
+  };
+  fallback.webdav = {
+    url: value?.webdav?.url ?? "",
+    username: value?.webdav?.username ?? "",
+    password: value?.webdav?.password ?? "",
+    path: value?.webdav?.path ?? "munan-ai-settings.json",
   };
 
   for (const option of MODEL_OPTIONS) {
