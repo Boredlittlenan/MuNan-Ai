@@ -84,11 +84,15 @@ function Settings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [settingsAlertClosing, setSettingsAlertClosing] = useState(false);
   const [exportedConfigPath, setExportedConfigPath] = useState("");
   const [transferDialog, setTransferDialog] = useState<"export" | "import" | null>(null);
   const [webDavDialogOpen, setWebDavDialogOpen] = useState(false);
+  const [customProviderDialogOpen, setCustomProviderDialogOpen] = useState(false);
+  const [deleteProviderDialogOpen, setDeleteProviderDialogOpen] = useState(false);
   const [visiblePasswordFields, setVisiblePasswordFields] = useState<string[]>([]);
   const [customModelName, setCustomModelName] = useState("");
+  const [customProviderName, setCustomProviderName] = useState("");
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   /**
@@ -124,6 +128,28 @@ function Settings() {
 
     void loadConfig();
   }, []);
+
+  useEffect(() => {
+    if (!error && !message) {
+      return;
+    }
+
+    setSettingsAlertClosing(false);
+    const closeTimer = window.setTimeout(() => {
+      setSettingsAlertClosing(true);
+    }, 5000);
+    const clearTimer = window.setTimeout(() => {
+      setError("");
+      setMessage("");
+      setExportedConfigPath("");
+      setSettingsAlertClosing(false);
+    }, 5240);
+
+    return () => {
+      window.clearTimeout(closeTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [error, message]);
 
   /**
    * 统一处理当前模型表单字段的写入。
@@ -245,10 +271,15 @@ function Settings() {
   };
 
   const addCustomProvider = () => {
-    const label = window.prompt("请输入自定义供应商名称，例如：Moonshot / OpenRouter / 本地模型");
-    const trimmedLabel = label?.trim();
+    setCustomProviderName("");
+    setCustomProviderDialogOpen(true);
+  };
+
+  const confirmAddCustomProvider = () => {
+    const trimmedLabel = customProviderName.trim();
 
     if (!trimmedLabel) {
+      setError("请输入自定义供应商名称。");
       return;
     }
 
@@ -280,6 +311,8 @@ function Settings() {
       ],
     }));
     setSelectedModel(nextId);
+    setCustomProviderDialogOpen(false);
+    setCustomProviderName("");
     setMessage("已添加自定义供应商，填写配置后点击保存设置。");
     setError("");
   };
@@ -289,8 +322,11 @@ function Settings() {
       return;
     }
 
-    const confirmed = window.confirm(`确认删除自定义供应商“${selectedMeta.label}”吗？`);
-    if (!confirmed) {
+    setDeleteProviderDialogOpen(true);
+  };
+
+  const confirmRemoveCustomProvider = () => {
+    if (isBuiltInModel(selectedModel)) {
       return;
     }
 
@@ -304,6 +340,7 @@ function Settings() {
     if (preferredModel === selectedModel) {
       setPreferredModel("openai");
     }
+    setDeleteProviderDialogOpen(false);
     setMessage("自定义供应商已删除，保存后写入配置文件。");
   };
 
@@ -490,14 +527,6 @@ function Settings() {
             <IoArrowBack size={18} />
             返回聊天
           </button>
-
-          <div>
-            <p className="page-eyebrow">Model Settings</p>
-            <h1 className="page-title">模型配置中心</h1>
-            <p className="page-description">
-              左侧选模型，右侧改配置。保存后聊天页会直接读取这份后端配置。
-            </p>
-          </div>
         </div>
 
         <div className="settings-header__actions">
@@ -536,20 +565,29 @@ function Settings() {
         </div>
       </header>
 
-      {/* 全局反馈统一放在正文前，避免用户保存后找不到结果提示。 */}
-      {error && <div className="alert-banner alert-banner--error">{error}</div>}
-      {message && (
-        <div className="alert-banner alert-banner--success">
-          <IoCheckmarkCircle size={18} />
-          <span>{message}</span>
-          {exportedConfigPath && (
-            <button
-              type="button"
-              className="alert-action-button"
-              onClick={() => void openExportedConfigDir()}
-            >
-              打开文件所在目录
-            </button>
+      {/* 全局反馈统一悬浮展示，避免弹出时挤压正文布局。 */}
+      {(error || message) && (
+        <div
+          className={`floating-alerts floating-alerts--settings ${
+            settingsAlertClosing ? "is-leaving" : ""
+          }`}
+          aria-live="polite"
+        >
+          {error && <div className="alert-banner alert-banner--error">{error}</div>}
+          {message && (
+            <div className="alert-banner alert-banner--success">
+              <IoCheckmarkCircle size={18} />
+              <span>{message}</span>
+              {exportedConfigPath && (
+                <button
+                  type="button"
+                  className="alert-action-button"
+                  onClick={() => void openExportedConfigDir()}
+                >
+                  打开文件所在目录
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -1064,6 +1102,87 @@ function Settings() {
           )}
         </main>
       </div>
+
+      {customProviderDialogOpen && (
+        <div className="settings-modal-backdrop" role="presentation">
+          <div className="settings-modal" role="dialog" aria-modal="true">
+            <div>
+              <p className="section-kicker">Custom Provider</p>
+              <h2>添加模型供应商</h2>
+              <p className="settings-help-text">
+                适合 OpenAI-compatible 接口，例如 OpenRouter、Moonshot 或本地模型服务。
+              </p>
+            </div>
+
+            <div className="settings-modal-form">
+              <label htmlFor="custom-provider-name">供应商名称</label>
+              <input
+                id="custom-provider-name"
+                className="settings-input"
+                type="text"
+                value={customProviderName}
+                placeholder="例如 OpenRouter / Moonshot / 本地模型"
+                autoFocus
+                onChange={(event) => setCustomProviderName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    confirmAddCustomProvider();
+                  }
+                }}
+              />
+            </div>
+
+            <div className="settings-modal-footer settings-modal-footer--split">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setCustomProviderDialogOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={confirmAddCustomProvider}
+              >
+                添加
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteProviderDialogOpen && (
+        <div className="settings-modal-backdrop" role="presentation">
+          <div className="settings-modal" role="dialog" aria-modal="true">
+            <div>
+              <p className="section-kicker">Delete Provider</p>
+              <h2>删除供应商</h2>
+              <p className="settings-help-text">
+                确认删除“{selectedMeta.label}”吗？删除后需要点击保存设置才会写入配置文件。
+              </p>
+            </div>
+
+            <div className="settings-modal-footer settings-modal-footer--split">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setDeleteProviderDialogOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="ghost-button danger-button"
+                onClick={confirmRemoveCustomProvider}
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {transferDialog && (
         <div className="settings-modal-backdrop" role="presentation">

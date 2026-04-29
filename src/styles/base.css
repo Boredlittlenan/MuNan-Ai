@@ -281,6 +281,36 @@ textarea {
   font-size: 13px;
   color: var(--text-1);
   background: rgba(255, 255, 255, 0.88);
+  animation: floating-alert-in 0.22s ease both;
+}
+
+.floating-alerts {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 60;
+  display: flex;
+  width: min(460px, calc(100vw - 36px));
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.floating-alerts--settings {
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.floating-alerts .alert-banner {
+  margin-bottom: 0;
+  pointer-events: auto;
+  box-shadow: var(--shadow-card);
+}
+
+.alert-banner.is-leaving,
+.floating-alerts.is-leaving .alert-banner {
+  animation: floating-alert-out 0.22s ease both;
 }
 
 .alert-banner--error {
@@ -369,6 +399,30 @@ code {
   font-size: 0.95em;
 }
 
+@keyframes floating-alert-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes floating-alert-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+}
+
 @media (max-width: 960px) {
   .page-shell {
     padding: 16px;
@@ -420,6 +474,17 @@ code {
   .alert-banner {
     align-items: flex-start;
     flex-wrap: wrap;
+  }
+
+  .floating-alerts {
+    top: 10px;
+    right: 10px;
+    left: 10px;
+    width: auto;
+  }
+
+  .floating-alerts--settings {
+    transform: none;
   }
 }
 

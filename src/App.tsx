@@ -107,6 +107,8 @@ function App() {
   );
   const [configError, setConfigError] = useState("");
   const [speechError, setSpeechError] = useState("");
+  const [copyNotice, setCopyNotice] = useState("");
+  const [copyNoticeClosing, setCopyNoticeClosing] = useState(false);
   const [speakingMessageKey, setSpeakingMessageKey] = useState<string | null>(null);
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
   const [expandedOriginalKeys, setExpandedOriginalKeys] = useState<string[]>([]);
@@ -326,25 +328,36 @@ function App() {
    * 3. 成功时写入 AI 回复，失败时写入错误提示气泡。
    */
   const sendMessage = async () => {
-    if (!input.trim() || loading || !currentConversation || !currentModelReady) {
+    if (!input.trim() || loading || !currentModelReady) {
       return;
     }
 
+    const activeConversation: Conversation =
+      currentConversation ??
+      {
+        id: `${model}-${Date.now()}`,
+        name: `${currentModelMeta.label} 会话 ${currentModelConversations.length + 1}`,
+        messages: [],
+      };
+    const shouldCreateConversation = !currentConversation;
     const userMessage: Message = {
       role: "user",
       content: input.trim(),
     };
 
-    const optimisticMessages = [...currentConversation.messages, userMessage];
+    const optimisticMessages = [...activeConversation.messages, userMessage];
 
     setConversations((previous) => ({
       ...previous,
-      [model]: (previous[model] ?? []).map((conversation) =>
-        conversation.id === currentConversation.id
-          ? { ...conversation, messages: optimisticMessages }
-          : conversation
-      ),
+      [model]: shouldCreateConversation
+        ? [{ ...activeConversation, messages: optimisticMessages }, ...(previous[model] ?? [])]
+        : (previous[model] ?? []).map((conversation) =>
+            conversation.id === activeConversation.id
+              ? { ...conversation, messages: optimisticMessages }
+              : conversation
+          ),
     }));
+    setCurrentConversationId(activeConversation.id);
 
     setInput("");
     setLoading(true);
@@ -363,7 +376,7 @@ function App() {
       setConversations((previous) => ({
         ...previous,
         [model]: (previous[model] ?? []).map((conversation) =>
-          conversation.id === currentConversation.id
+          conversation.id === activeConversation.id
             ? {
                 ...conversation,
                 messages: [
@@ -383,7 +396,7 @@ function App() {
       setConversations((previous) => ({
         ...previous,
         [model]: (previous[model] ?? []).map((conversation) =>
-          conversation.id === currentConversation.id
+          conversation.id === activeConversation.id
             ? {
                 ...conversation,
                 messages: [
@@ -461,8 +474,15 @@ function App() {
     try {
       await navigator.clipboard.writeText(content);
       setCopiedMessageKey(messageKey);
+      setCopyNotice("回复已复制到剪贴板。");
+      setCopyNoticeClosing(false);
       window.setTimeout(() => {
         setCopiedMessageKey((current) => (current === messageKey ? null : current));
+        setCopyNoticeClosing(true);
+      }, 1000);
+      window.setTimeout(() => {
+        setCopyNotice("");
+        setCopyNoticeClosing(false);
       }, 1200);
     } catch (error) {
       setSpeechError(`复制失败：${String(error)}`);
@@ -626,14 +646,6 @@ function App() {
     <div className="page-shell chat-page">
       {/* 顶部导航区：负责品牌展示、状态说明和进入设置页。 */}
       <header className="page-header chat-header">
-        <div>
-          <p className="page-eyebrow">MuNan AI Desktop</p>
-          <h1 className="page-title">多模型对话工作台</h1>
-          <p className="page-description">
-            左侧管理会话，右侧专注聊天，设置页统一维护每个模型的接口与密钥。
-          </p>
-        </div>
-
         <div className="header-actions">
           <div className={`status-chip ${currentModelReady ? "is-ready" : "is-warning"}`}>
             {currentModelReady ? "当前模型已就绪" : "当前模型待配置"}
@@ -811,20 +823,37 @@ function App() {
           </div>
 
           {/* 这里集中展示配置加载问题，避免状态信息散落在页面各处。 */}
-          {configStatus === "error" && (
-            <div className="alert-banner alert-banner--error">
-              配置加载失败：{configError}
-            </div>
-          )}
+          {(configStatus === "error" ||
+            (!currentModelReady && configStatus === "ready") ||
+            speechError ||
+            copyNotice) && (
+            <div className="floating-alerts floating-alerts--chat" aria-live="polite">
+              {configStatus === "error" && (
+                <div className="alert-banner alert-banner--error">
+                  配置加载失败：{configError}
+                </div>
+              )}
 
-          {!currentModelReady && configStatus === "ready" && (
-            <div className="alert-banner alert-banner--warning">
-              当前模型还没有配置完整。请前往设置页补充 Base URL、API Key 和模型名。
-            </div>
-          )}
+              {!currentModelReady && configStatus === "ready" && (
+                <div className="alert-banner alert-banner--warning">
+                  当前模型还没有配置完整。请前往设置页补充 Base URL、API Key 和模型名。
+                </div>
+              )}
 
-          {speechError && (
-            <div className="alert-banner alert-banner--warning">{speechError}</div>
+              {speechError && (
+                <div className="alert-banner alert-banner--warning">{speechError}</div>
+              )}
+
+              {copyNotice && (
+                <div
+                  className={`alert-banner alert-banner--success ${
+                    copyNoticeClosing ? "is-leaving" : ""
+                  }`}
+                >
+                  {copyNotice}
+                </div>
+              )}
+            </div>
           )}
 
           <div className="chat-box">
@@ -864,8 +893,8 @@ function App() {
               )
             ) : (
               <div className="chat-empty-state">
-                <h3>先选择一个会话</h3>
-                <p>如果左侧还是空的，可以点击“新建会话”快速开始。</p>
+                <h3>直接输入即可开始</h3>
+                <p>发送第一条消息时会自动创建新会话，也可以从侧边栏手动新建。</p>
               </div>
             )}
 
@@ -886,7 +915,7 @@ function App() {
             <div className="input-caption">
               {currentConversation
                 ? "Enter 发送消息，先把模型配置好可以避免请求失败。"
-                : "请先创建或选择一个会话。"}
+                : "还没有会话，发送第一条消息时会自动创建。"}
             </div>
 
             <div className="input-area">
@@ -895,7 +924,7 @@ function App() {
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 placeholder="输入你的问题、代码需求或灵感草稿..."
-                disabled={loading || !currentConversation || !currentModelReady}
+                disabled={loading || !currentModelReady}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
@@ -912,7 +941,6 @@ function App() {
                 onClick={toggleRecording}
                 disabled={
                   loading ||
-                  !currentConversation ||
                   !currentModelReady ||
                   recordingState === "transcribing"
                 }
@@ -944,7 +972,6 @@ function App() {
                 onClick={() => void sendMessage()}
                 disabled={
                   loading ||
-                  !currentConversation ||
                   !currentModelReady ||
                   recordingState !== "idle"
                 }

@@ -8,6 +8,10 @@
   gap: 14px;
 }
 
+.settings-header__intro .back-button {
+  width: auto;
+}
+
 .settings-header__actions {
   display: flex;
   flex-wrap: wrap;
@@ -291,6 +295,7 @@ select.settings-input {
   padding: 18px;
   background: rgba(21, 31, 48, 0.34);
   overflow-y: auto;
+  animation: modal-backdrop-in 0.2s ease both;
 }
 
 .settings-modal {
@@ -305,6 +310,7 @@ select.settings-input {
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(255, 255, 255, 0.84);
   box-shadow: var(--shadow-panel);
+  animation: modal-panel-in 0.22s ease both;
 }
 
 .settings-modal--wide {
@@ -336,6 +342,11 @@ select.settings-input {
 .settings-modal-footer {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-modal-footer--split {
+  justify-content: space-between;
 }
 
 .speech-settings-grid {
@@ -347,6 +358,28 @@ select.settings-input {
 .speech-settings-card h3 {
   margin: 0;
   font-size: 16px;
+}
+
+@keyframes modal-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 @media (max-width: 1080px) {
