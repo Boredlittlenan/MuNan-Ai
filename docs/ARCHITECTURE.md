@@ -5,6 +5,7 @@
 - `src/App.tsx`: chat workspace UI and conversation state.
 - `src/Settings.tsx`: model configuration UI.
 - `src/modelConfig.ts`: shared frontend model metadata, storage helpers, and config types.
+- Conversation history loads from Tauri commands and is persisted in backend SQLite; `localStorage` is only used for lightweight UI state and legacy migration.
 - `src/styles/`: page and shared styles.
 
 ## Tauri Backend
@@ -13,14 +14,15 @@
 - `src-tauri/src/main.rs`: binary entry point only.
 - `src-tauri/src/commands/`: Tauri command handlers.
 - `src-tauri/src/config.rs`: runtime config loading, saving, and schema structs.
+- `src-tauri/src/storage.rs`: SQLite conversation storage and Tauri commands.
 - `src-tauri/src/ai/`: chat model adapters and OpenAI-compatible request helpers.
 - `src-tauri/src/speech/`: reserved ASR and TTS command/types modules.
 
 ## Runtime Config
 
-- Keep real keys in `src-tauri/config.json` or `src-tauri/config.local.json`.
+- Runtime config is saved in the OS app data directory as `config.json`.
 - Use `src-tauri/config.example.json` as the committed template.
-- `config.local.json` is preferred when it exists, then `config.json`.
+- Old `config.local.json` / `config.json` files in the repo are migrated automatically on first load.
 
 ## Adding ASR/TTS Later
 

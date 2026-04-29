@@ -23,7 +23,11 @@ export type Message = {
 
 export type Conversation = {
   id: string;
+  model?: ModelType;
+  provider_model?: string;
   name: string;
+  created_at?: number;
+  updated_at?: number;
   messages: Message[];
 };
 
@@ -62,6 +66,7 @@ export type SpeechConfig = {
 };
 
 export type PersonaConfig = {
+  username: string;
   prompt: string;
 };
 
@@ -73,6 +78,7 @@ export type WebDavConfig = {
 };
 
 export type AppConfig = Record<BuiltInModelType, ModelConfig> & {
+  schema_version: number;
   speech: SpeechConfig;
   persona: PersonaConfig;
   webdav: WebDavConfig;
@@ -153,11 +159,12 @@ const USER_STATE_STORAGE_KEY = "userState";
 const PREFERRED_MODEL_STORAGE_KEY = "preferredModel";
 
 export const createEmptyAppConfig = (): AppConfig => ({
+  schema_version: 1,
   openai: { base_url: "", api_key: "", model: "" },
   deepseek: { base_url: "", api_key: "", model: "" },
   qwen: { base_url: "", api_key: "", model: "" },
   mimo: { base_url: "", api_key: "", model: "" },
-  nvidia: { base_url: "https://integrate.api.nvidia.com/v1", api_key: "", model: "" },
+  nvidia: { base_url: "https://integrate.api.nvidia.com/v1/chat/completions", api_key: "", model: "" },
   speech: {
     asr: {
       provider: "openai_like",
@@ -173,6 +180,7 @@ export const createEmptyAppConfig = (): AppConfig => ({
     tts: { base_url: "", api_key: "", model: "", voice: "", voice_description: "" },
   },
   persona: {
+    username: "",
     prompt:
       "你是 MuNan AI，一个温和、清晰、可靠的桌面 AI 助手。你会优先理解用户真实意图，回答时直接、有条理，并在需要时给出可执行步骤。",
   },
@@ -286,11 +294,13 @@ export const normalizeAppConfig = (
         webdav?: Partial<WebDavConfig>;
         custom_models?: Partial<Record<BuiltInModelType, string[]>>;
         custom_providers?: Partial<CustomProviderConfig>[];
+        schema_version?: number;
       })
     | null
     | undefined
 ): AppConfig => {
   const fallback = createEmptyAppConfig();
+  fallback.schema_version = value?.schema_version ?? fallback.schema_version;
 
   for (const option of MODEL_OPTIONS) {
     const current = value?.[option.id];
@@ -322,6 +332,7 @@ export const normalizeAppConfig = (
     },
   };
   fallback.persona = {
+    username: value?.persona?.username ?? fallback.persona.username,
     prompt: value?.persona?.prompt ?? fallback.persona.prompt,
   };
   fallback.webdav = {
@@ -365,6 +376,51 @@ export const createEmptyConversations = (): Record<ModelType, Conversation[]> =>
   nvidia: [],
 });
 
+export const normalizeConversations = (
+  value: Partial<Record<ModelType, Array<Partial<Conversation>>>> | null | undefined
+): Record<ModelType, Conversation[]> => {
+  const fallback = createEmptyConversations();
+  const now = Date.now();
+
+  for (const [modelId, modelConversations] of Object.entries(value ?? {})) {
+    fallback[modelId] = Array.isArray(modelConversations)
+      ? modelConversations
+          .filter((conversation) => typeof conversation.id === "string" && conversation.id.trim())
+          .map((conversation) => {
+            const createdAt = Number(conversation.created_at) || now;
+            const updatedAt = Number(conversation.updated_at) || createdAt;
+
+            return {
+              id: conversation.id!.trim(),
+              model: conversation.model?.trim() || modelId,
+              provider_model: conversation.provider_model ?? "",
+              name: conversation.name?.trim() || "未命名会话",
+              created_at: createdAt,
+              updated_at: updatedAt,
+              messages: Array.isArray(conversation.messages)
+                ? conversation.messages
+                    .filter((message) => message.role === "user" || message.role === "ai")
+                    .map((message) => ({
+                      role: message.role,
+                      content: message.content ?? "",
+                      tts_text: message.tts_text,
+                      original_content: message.original_content,
+                    }))
+                : [],
+            };
+          })
+      : [];
+  }
+
+  return fallback;
+};
+
+export const hasAnyConversations = (
+  conversations: Record<ModelType, Conversation[]>
+): boolean => {
+  return Object.values(conversations).some((items) => items.length > 0);
+};
+
 export const normalizeModelType = (value: string | null | undefined): ModelType => {
   return value?.trim() || "openai";
 };
@@ -377,37 +433,14 @@ export const loadConversationsFromStorage = (): Record<ModelType, Conversation[]
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<Record<ModelType, Conversation[]>>;
-    const fallback = createEmptyConversations();
-
-    for (const [modelId, modelConversations] of Object.entries(parsed ?? {})) {
-      fallback[modelId] = Array.isArray(modelConversations)
-        ? modelConversations.map((conversation) => ({
-            ...conversation,
-            messages: Array.isArray(conversation.messages)
-              ? conversation.messages
-                  .filter((message) => message.role === "user" || message.role === "ai")
-                  .map((message) => ({
-                    role: message.role,
-                    content: message.content ?? "",
-                    tts_text: message.tts_text,
-                    original_content: message.original_content,
-                  }))
-              : [],
-          }))
-        : [];
-    }
-
-    return fallback;
+    return normalizeConversations(JSON.parse(raw));
   } catch {
     return createEmptyConversations();
   }
 };
 
-export const saveConversationsToStorage = (
-  conversations: Record<ModelType, Conversation[]>
-): void => {
-  localStorage.setItem(CONVERSATIONS_STORAGE_KEY, JSON.stringify(conversations));
+export const clearLegacyConversationsStorage = (): void => {
+  localStorage.removeItem(CONVERSATIONS_STORAGE_KEY);
 };
 
 export const loadPreferredModel = (): ModelType => {

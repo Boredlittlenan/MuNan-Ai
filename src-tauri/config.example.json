@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "openai": {
     "base_url": "https://api.openai.com/v1/chat/completions",
     "api_key": "",
@@ -45,6 +46,7 @@
     }
   },
   "persona": {
+    "username": "",
     "prompt": "你是 MuNan AI，一个温和、清晰、可靠的桌面 AI 助手。你会优先理解用户真实意图，回答时直接、有条理，并在需要时给出可执行步骤。"
   },
   "webdav": {

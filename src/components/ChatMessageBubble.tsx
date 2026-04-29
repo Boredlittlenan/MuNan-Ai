@@ -58,12 +58,10 @@ export function ChatMessageBubble({
   return (
     <div className={`chat-line ${message.role === "user" ? "chat-user" : "chat-ai"}`}>
       <div className={`chat-bubble ${isEditing ? "is-editing" : ""}`}>
-        <div className="chat-bubble__topline">
-          <span className="chat-role">
-            {message.role === "user" ? "你" : modelLabel}
-          </span>
+        {isAiReply && (
+          <div className="chat-bubble__topline">
+            <span className="chat-role">{modelLabel}</span>
 
-          {isAiReply && (
             <div className="chat-message-actions">
               <button
                 type="button"
@@ -103,8 +101,8 @@ export function ChatMessageBubble({
                 {isSpeaking ? <IoStopCircleOutline size={17} /> : <IoVolumeHigh size={17} />}
               </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {isEditing && editingReply ? (
           <div className="reply-editor">

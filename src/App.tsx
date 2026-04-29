@@ -9,6 +9,7 @@ import {
   IoMic,
   IoSettingsSharp,
   IoStopCircleOutline,
+  IoTrashOutline,
 } from "react-icons/io5";
 
 import "./styles/base.css";
@@ -24,15 +25,18 @@ import {
   type Conversation,
   type Message,
   type ModelType,
+  clearLegacyConversationsStorage,
   createEmptyAppConfig,
+  createEmptyConversations,
   getModelChoices,
   getModelConfig,
   getModelMeta,
   getModelOptions,
+  hasAnyConversations,
   loadConversationsFromStorage,
   loadUserState,
+  normalizeConversations,
   normalizeAppConfig,
-  saveConversationsToStorage,
   saveUserState,
   isModelConfigured,
   updateModelConfig,
@@ -56,7 +60,7 @@ type ChatReplyResponse = {
 /* =========================
    页面职责说明
    1. 管理聊天首页的模型切换、会话切换和消息发送。
-   2. 把会话历史存进 localStorage，保证刷新后仍能恢复。
+   2. 把会话历史存进后端 SQLite，保证长期使用时稳定恢复。
    3. 启动时读取后端配置，用于判断当前模型是否可直接使用。
    ========================= */
 
@@ -80,7 +84,8 @@ function App() {
    *   qwen: [Conversation, ...]
    * }
    */
-  const [conversations, setConversations] = useState(loadConversationsFromStorage);
+  const [conversations, setConversations] = useState(createEmptyConversations);
+  const [conversationsReady, setConversationsReady] = useState(false);
 
   /**
    * 当前正在查看的会话 ID。
@@ -106,6 +111,7 @@ function App() {
     "idle"
   );
   const [configError, setConfigError] = useState("");
+  const [historyError, setHistoryError] = useState("");
   const [speechError, setSpeechError] = useState("");
   const [copyNotice, setCopyNotice] = useState("");
   const [copyNoticeClosing, setCopyNoticeClosing] = useState(false);
@@ -203,12 +209,69 @@ function App() {
   }, []);
 
   /**
-   * 会话仓库只要变化，就立即持久化。
-   * 这样关闭应用、刷新页面或切换路由后都能恢复聊天上下文。
+   * 会话长期存储在 Rust 侧 SQLite。
+   * 首次升级时，如果发现旧 localStorage 里还有会话，会自动导入 SQLite。
    */
   useEffect(() => {
-    saveConversationsToStorage(conversations);
-  }, [conversations]);
+    let canceled = false;
+
+    const loadConversationHistory = async () => {
+      setHistoryError("");
+
+      try {
+        const stored = normalizeConversations(
+          await invoke<Record<ModelType, Conversation[]>>("load_conversations")
+        );
+        const legacy = loadConversationsFromStorage();
+        const shouldImportLegacy =
+          !hasAnyConversations(stored) && hasAnyConversations(legacy);
+        const nextConversations = shouldImportLegacy ? legacy : stored;
+
+        if (shouldImportLegacy) {
+          await invoke("save_conversations", { conversations: nextConversations });
+          clearLegacyConversationsStorage();
+        }
+
+        if (!canceled) {
+          setConversations(nextConversations);
+        }
+      } catch (error) {
+        const legacy = loadConversationsFromStorage();
+
+        if (!canceled) {
+          setConversations(legacy);
+          setHistoryError(`会话数据库加载失败，已临时使用旧本地缓存：${String(error)}`);
+        }
+      } finally {
+        if (!canceled) {
+          setConversationsReady(true);
+        }
+      }
+    };
+
+    void loadConversationHistory();
+
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  /**
+   * 会话变化后写入 SQLite。用短延迟合并连续编辑，避免改会话名时每个字符都落库。
+   */
+  useEffect(() => {
+    if (!conversationsReady) {
+      return;
+    }
+
+    const saveTimer = window.setTimeout(() => {
+      void invoke("save_conversations", { conversations }).catch((error) => {
+        setHistoryError(`会话数据库保存失败：${String(error)}`);
+      });
+    }, 300);
+
+    return () => window.clearTimeout(saveTimer);
+  }, [conversations, conversationsReady]);
 
   /**
    * 记录“当前模型 + 当前会话”。
@@ -223,6 +286,10 @@ function App() {
    * 这是之前容易出问题的地方：旧模型的会话 ID 在新模型里不存在，会导致右侧空白。
    */
   useEffect(() => {
+    if (!conversationsReady) {
+      return;
+    }
+
     const hasCurrentConversation = currentModelConversations.some(
       (conversation) => conversation.id === currentConversationId
     );
@@ -230,7 +297,7 @@ function App() {
     if (!hasCurrentConversation) {
       setCurrentConversationId(currentModelConversations[0]?.id ?? null);
     }
-  }, [currentConversationId, currentModelConversations]);
+  }, [conversationsReady, currentConversationId, currentModelConversations]);
 
   /**
    * 新消息加入后自动滚动到底部，保证桌面端长对话体验更顺手。
@@ -271,9 +338,14 @@ function App() {
    * 新建会话时使用模型名做前缀，方便用户在多模型场景下快速区分用途。
    */
   const createNewConversation = () => {
+    const now = Date.now();
     const nextConversation: Conversation = {
       id: `${model}-${Date.now()}`,
+      model,
+      provider_model: currentProviderConfig.model,
       name: `${currentModelMeta.label} 会话 ${currentModelConversations.length + 1}`,
+      created_at: now,
+      updated_at: now,
       messages: [],
     };
 
@@ -308,6 +380,8 @@ function App() {
    * 为了避免误清空，这里对纯空白做了 trim 校验，空值时回退到原名称。
    */
   const renameConversation = (conversationId: string, name: string) => {
+    const now = Date.now();
+
     setConversations((previous) => ({
       ...previous,
       [model]: (previous[model] ?? []).map((conversation) =>
@@ -315,6 +389,7 @@ function App() {
           ? {
               ...conversation,
               name: name.trimStart(),
+              updated_at: now,
             }
           : conversation
       ),
@@ -328,15 +403,20 @@ function App() {
    * 3. 成功时写入 AI 回复，失败时写入错误提示气泡。
    */
   const sendMessage = async () => {
-    if (!input.trim() || loading || !currentModelReady) {
+    if (!input.trim() || loading || !currentModelReady || !conversationsReady) {
       return;
     }
 
+    const now = Date.now();
     const activeConversation: Conversation =
       currentConversation ??
       {
         id: `${model}-${Date.now()}`,
+        model,
+        provider_model: currentProviderConfig.model,
         name: `${currentModelMeta.label} 会话 ${currentModelConversations.length + 1}`,
+        created_at: now,
+        updated_at: now,
         messages: [],
       };
     const shouldCreateConversation = !currentConversation;
@@ -350,10 +430,13 @@ function App() {
     setConversations((previous) => ({
       ...previous,
       [model]: shouldCreateConversation
-        ? [{ ...activeConversation, messages: optimisticMessages }, ...(previous[model] ?? [])]
+        ? [
+            { ...activeConversation, updated_at: now, messages: optimisticMessages },
+            ...(previous[model] ?? []),
+          ]
         : (previous[model] ?? []).map((conversation) =>
             conversation.id === activeConversation.id
-              ? { ...conversation, messages: optimisticMessages }
+              ? { ...conversation, updated_at: now, messages: optimisticMessages }
               : conversation
           ),
     }));
@@ -379,6 +462,7 @@ function App() {
           conversation.id === activeConversation.id
             ? {
                 ...conversation,
+                updated_at: Date.now(),
                 messages: [
                   ...optimisticMessages,
                   {
@@ -399,6 +483,7 @@ function App() {
           conversation.id === activeConversation.id
             ? {
                 ...conversation,
+                updated_at: Date.now(),
                 messages: [
                   ...optimisticMessages,
                   {
@@ -452,6 +537,7 @@ function App() {
         conversation.id === currentConversationId
           ? {
               ...conversation,
+              updated_at: Date.now(),
               messages: conversation.messages.map((message, index) =>
                 index === messageIndex && message.role === "ai"
                   ? {
@@ -736,13 +822,6 @@ function App() {
               ))}
             </select>
 
-            <div className="model-select-summary">
-              <span className="section-badge">{currentModelMeta.provider}</span>
-              {currentProviderConfig.model && (
-                <span className="section-badge model-name-badge">{currentProviderConfig.model}</span>
-              )}
-              <span className={`status-dot ${currentModelReady ? "is-ready" : "is-missing"}`} />
-            </div>
           </section>
 
           <section className="sidebar-section">
@@ -787,13 +866,15 @@ function App() {
 
                     <button
                       type="button"
-                      className="ghost-button danger-button"
+                      className="conversation-delete-button"
+                      aria-label={`删除会话 ${conversation.name}`}
+                      title="删除会话"
                       onClick={(event) => {
                         event.stopPropagation();
                         deleteConversation(conversation.id);
                       }}
                     >
-                      删除
+                      <IoTrashOutline size={17} />
                     </button>
                   </li>
                 ))}
@@ -824,6 +905,7 @@ function App() {
 
           {/* 这里集中展示配置加载问题，避免状态信息散落在页面各处。 */}
           {(configStatus === "error" ||
+            historyError ||
             (!currentModelReady && configStatus === "ready") ||
             speechError ||
             copyNotice) && (
@@ -832,6 +914,10 @@ function App() {
                 <div className="alert-banner alert-banner--error">
                   配置加载失败：{configError}
                 </div>
+              )}
+
+              {historyError && (
+                <div className="alert-banner alert-banner--warning">{historyError}</div>
               )}
 
               {!currentModelReady && configStatus === "ready" && (
@@ -923,8 +1009,8 @@ function App() {
                 className="input-box"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="输入你的问题、代码需求或灵感草稿..."
-                disabled={loading || !currentModelReady}
+                placeholder="输入问题、代码需求或灵感草稿..."
+                disabled={loading || !currentModelReady || !conversationsReady}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
@@ -942,6 +1028,7 @@ function App() {
                 disabled={
                   loading ||
                   !currentModelReady ||
+                  !conversationsReady ||
                   recordingState === "transcribing"
                 }
                 title={
@@ -973,6 +1060,7 @@ function App() {
                 disabled={
                   loading ||
                   !currentModelReady ||
+                  !conversationsReady ||
                   recordingState !== "idle"
                 }
               >

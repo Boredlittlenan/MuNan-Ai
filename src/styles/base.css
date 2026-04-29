@@ -86,6 +86,7 @@ textarea {
   padding: 22px;
   position: relative;
   z-index: 1;
+  animation: page-fade-in 0.18s ease both;
 }
 
 .page-header {
@@ -153,9 +154,8 @@ textarea {
   font-size: 14px;
   font-weight: 650;
   transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease,
     background-color 0.18s ease,
+    border-color 0.18s ease,
     color 0.18s ease;
 }
 
@@ -167,16 +167,14 @@ textarea {
   font-size: 14px;
   font-weight: 650;
   transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease,
     background-color 0.18s ease,
+    border-color 0.18s ease,
     color 0.18s ease;
 }
 
 .primary-button {
   color: #fff;
   background: #1d72f3;
-  box-shadow: 0 12px 24px rgba(29, 114, 243, 0.22);
 }
 
 .ghost-button,
@@ -189,15 +187,19 @@ textarea {
 .primary-button:hover,
 .ghost-button:hover,
 .icon-action:hover {
-  transform: translateY(-1px);
+  background-color: rgba(255, 255, 255, 0.94);
+  border-color: rgba(29, 114, 243, 0.2);
+}
+
+.primary-button:hover {
+  color: #fff;
+  background-color: #155fd0;
 }
 
 .primary-button:disabled,
 .ghost-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
 }
 
 .danger-button {
@@ -420,6 +422,22 @@ code {
   to {
     opacity: 0;
     transform: translateY(-8px) scale(0.98);
+  }
+}
+
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-shell {
+    animation: none;
   }
 }
 

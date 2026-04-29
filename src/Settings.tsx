@@ -11,7 +11,6 @@ import {
   IoInformationCircleOutline,
   IoRefresh,
   IoSave,
-  IoServerOutline,
 } from "react-icons/io5";
 
 import "./styles/base.css";
@@ -33,7 +32,6 @@ import {
   getModelConfig,
   getModelMeta,
   getModelOptions,
-  isModelConfigured,
   isBuiltInModel,
   loadPreferredModel,
   normalizeAppConfig,
@@ -50,6 +48,18 @@ const TENCENT_ASR_ENGINE_OPTIONS = [
   { value: "8k_en", label: "8k_en（电话英语）" },
 ];
 
+type SettingsSection = "user" | "model" | "speech";
+
+const SETTINGS_SECTIONS: Array<{
+  id: SettingsSection;
+  title: string;
+  meta: string;
+}> = [
+  { id: "user", title: "基础配置", meta: "用户、默认模型与备份同步" },
+  { id: "model", title: "模型配置", meta: "供应商、密钥与模型名称" },
+  { id: "speech", title: "ASR / TTS 配置", meta: "语音识别与语音合成" },
+];
+
 /* =========================
    页面职责说明
    1. 从 Rust 后端读取 config.json，并映射到表单。
@@ -59,6 +69,7 @@ const TENCENT_ASR_ENGINE_OPTIONS = [
 
 function Settings() {
   const navigate = useNavigate();
+  const [activeSection, setActiveSection] = useState<SettingsSection>("user");
 
   /**
    * selectedModel 表示“当前正在编辑哪个模型”。
@@ -87,7 +98,6 @@ function Settings() {
   const [settingsAlertClosing, setSettingsAlertClosing] = useState(false);
   const [exportedConfigPath, setExportedConfigPath] = useState("");
   const [transferDialog, setTransferDialog] = useState<"export" | "import" | null>(null);
-  const [webDavDialogOpen, setWebDavDialogOpen] = useState(false);
   const [customProviderDialogOpen, setCustomProviderDialogOpen] = useState(false);
   const [deleteProviderDialogOpen, setDeleteProviderDialogOpen] = useState(false);
   const [visiblePasswordFields, setVisiblePasswordFields] = useState<string[]>([]);
@@ -208,6 +218,16 @@ function Settings() {
       persona: {
         ...previous.persona,
         prompt,
+      },
+    }));
+  };
+
+  const updateUsername = (username: string) => {
+    setConfig((previous) => ({
+      ...previous,
+      persona: {
+        ...previous.persona,
+        username,
       },
     }));
   };
@@ -538,11 +558,6 @@ function Settings() {
             onChange={(event) => void importSettings(event.target.files?.[0])}
           />
 
-          <button type="button" className="ghost-button" onClick={() => setWebDavDialogOpen(true)}>
-            <IoServerOutline size={18} />
-            WebDAV 配置
-          </button>
-
           <button type="button" className="ghost-button" onClick={() => setTransferDialog("export")}>
             <IoDownloadOutline size={18} />
             导出设置
@@ -593,65 +608,33 @@ function Settings() {
       )}
 
       <div className="settings-layout">
-        {/* 左栏用于模型选择和总体概览，是本次重点优化的交互区域。 */}
+        {/* 左栏只负责设置分类导航，具体配置放到右侧内容区。 */}
         <aside className="settings-sidebar glass-panel">
           <div className="section-heading">
             <div>
-              <p className="section-kicker">模型导航</p>
-              <h2>选择要编辑的模型</h2>
+              <p className="section-kicker">Settings</p>
+              <h2>设置分类</h2>
             </div>
-            <button type="button" className="ghost-button" onClick={addCustomProvider}>
-              添加供应商
-            </button>
           </div>
 
-          <div className="settings-model-list">
-            {modelOptions.map((option) => {
-              const ready = isModelConfigured(config, option.id);
-
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={`settings-model-card ${
-                    selectedModel === option.id ? "is-active" : ""
-                  }`}
-                  onClick={() => {
-                    setSelectedModel(option.id);
-                    setMessage("");
-                    setError("");
-                  }}
-                >
-                  <div>
-                    <span className="settings-model-card__title">{option.label}</span>
-                    <span className="settings-model-card__meta">{option.provider}</span>
-                  </div>
-
-                  <span className={`status-chip ${ready ? "is-ready" : "is-warning"}`}>
-                    {ready ? "已配置" : "待完善"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="settings-summary-card">
-            <p className="section-kicker">默认模型</p>
-            <h3>聊天页默认打开</h3>
-            <select
-              className="settings-select"
-              value={preferredModel}
-              onChange={(event) => setPreferredModel(event.target.value as ModelType)}
-            >
-              {modelOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label} · {option.provider}
-                </option>
-              ))}
-            </select>
-            <p className="settings-help-text">
-              这个设置会写入本地状态，下次回到聊天页时会优先切到这里。
-            </p>
+          <div className="settings-category-list">
+            {SETTINGS_SECTIONS.map((section) => (
+              <button
+                key={section.id}
+                type="button"
+                className={`settings-category-card ${
+                  activeSection === section.id ? "is-active" : ""
+                }`}
+                onClick={() => {
+                  setActiveSection(section.id);
+                  setMessage("");
+                  setError("");
+                }}
+              >
+                <span className="settings-model-card__title">{section.title}</span>
+                <span className="settings-model-card__meta">{section.meta}</span>
+              </button>
+            ))}
           </div>
         </aside>
 
@@ -660,20 +643,24 @@ function Settings() {
           <div className="settings-main__header">
             <div>
               <p className="section-kicker">当前编辑</p>
-              <h2>{selectedMeta.label}</h2>
-              <p className="settings-main__subtitle">{selectedMeta.description}</p>
+              <h2>{SETTINGS_SECTIONS.find((section) => section.id === activeSection)?.title}</h2>
+              <p className="settings-main__subtitle">
+                {SETTINGS_SECTIONS.find((section) => section.id === activeSection)?.meta}
+              </p>
             </div>
 
-            <div className="settings-main__actions">
-              {isCustomProviderSelected && (
-                <button type="button" className="ghost-button danger-button" onClick={removeCustomProvider}>
-                  删除供应商
+            {activeSection === "model" && (
+              <div className="settings-main__actions">
+                {isCustomProviderSelected && (
+                  <button type="button" className="ghost-button danger-button" onClick={removeCustomProvider}>
+                    删除供应商
+                  </button>
+                )}
+                <button type="button" className="ghost-button danger-button" onClick={clearSelectedModel}>
+                  清空当前模型
                 </button>
-              )}
-              <button type="button" className="ghost-button danger-button" onClick={clearSelectedModel}>
-                清空当前模型
-              </button>
-            </div>
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -682,9 +669,190 @@ function Settings() {
               <span>稍等一下，表单会自动填充现有配置。</span>
             </div>
           ) : (
-            <div className="settings-form">
+            <>
+              {activeSection === "user" && (
+                <div className="settings-form">
+                  <div className="settings-field">
+                    <div>
+                      <p className="section-kicker">Profile</p>
+                      <h3>用户信息</h3>
+                    </div>
+
+                    <label htmlFor="persona-username">用户名</label>
+                    <input
+                      id="persona-username"
+                      className="settings-input"
+                      type="text"
+                      value={config.persona.username}
+                      placeholder="例如：木南"
+                      onChange={(event) => updateUsername(event.target.value)}
+                    />
+                    <p className="settings-help-text">
+                      用户名会在每次对话时告知 AI，用来帮助模型理解称呼与上下文。
+                    </p>
+                  </div>
+
+                  <div className="settings-field">
+                    <div>
+                      <p className="section-kicker">Default Model</p>
+                      <h3>聊天页默认打开</h3>
+                    </div>
+
+                    <label htmlFor="preferred-model">默认模型</label>
+                    <select
+                      id="preferred-model"
+                      className="settings-input"
+                      value={preferredModel}
+                      onChange={(event) => setPreferredModel(event.target.value as ModelType)}
+                    >
+                      {modelOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label} · {option.provider}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="settings-help-text">
+                      保存设置后，聊天页下次打开会优先使用这个模型。
+                    </p>
+                  </div>
+
+                  <div className="settings-field settings-field--wide">
+                    <div>
+                      <p className="section-kicker">WebDAV</p>
+                      <h3>WebDAV 备份配置</h3>
+                    </div>
+
+                    <p className="settings-help-text">
+                      WebDAV 配置只保存在本机配置中，不会出现在导入/导出的备份内容里。
+                    </p>
+
+                    <label htmlFor="webdav-url">WebDAV 地址</label>
+                    <input
+                      id="webdav-url"
+                      className="settings-input"
+                      type="text"
+                      value={config.webdav.url}
+                      placeholder="例如 https://example.com/dav/backups"
+                      onChange={(event) => updateWebDavField("url", event.target.value)}
+                    />
+
+                    <label htmlFor="webdav-path">备份文件路径</label>
+                    <input
+                      id="webdav-path"
+                      className="settings-input"
+                      type="text"
+                      value={config.webdav.path}
+                      placeholder="munan-ai-settings.json"
+                      onChange={(event) => updateWebDavField("path", event.target.value)}
+                    />
+
+                    <label htmlFor="webdav-username">用户名</label>
+                    <input
+                      id="webdav-username"
+                      className="settings-input"
+                      type="text"
+                      value={config.webdav.username}
+                      placeholder="WebDAV 用户名，可留空"
+                      onChange={(event) => updateWebDavField("username", event.target.value)}
+                    />
+
+                    <label htmlFor="webdav-password">密码</label>
+                    <div className="password-input-row">
+                      <input
+                        id="webdav-password"
+                        className="settings-input"
+                        type={passwordInputType("webdav-password")}
+                        value={config.webdav.password}
+                        placeholder="WebDAV 密码或应用专用密码"
+                        onChange={(event) => updateWebDavField("password", event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle-button"
+                        onClick={() => togglePasswordVisibility("webdav-password")}
+                        aria-label={isPasswordVisible("webdav-password") ? "隐藏 WebDAV 密码" : "显示 WebDAV 密码"}
+                        title={isPasswordVisible("webdav-password") ? "隐藏" : "显示"}
+                      >
+                        {isPasswordVisible("webdav-password") ? (
+                          <IoEyeOffOutline size={17} />
+                        ) : (
+                          <IoEyeOutline size={17} />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="settings-field settings-field--wide">
+                    <div>
+                      <p className="section-kicker">Persona</p>
+                      <h3>AI 人设</h3>
+                    </div>
+
+                    <label htmlFor="persona-prompt">后台人设提示词</label>
+                    <textarea
+                      id="persona-prompt"
+                      className="settings-input settings-textarea persona-textarea"
+                      value={config.persona.prompt}
+                      placeholder="例如：你是一个温和、清晰、可靠的桌面 AI 助手，回答直接、有条理。"
+                      onChange={(event) => updatePersonaPrompt(event.target.value)}
+                    />
+                    <p className="settings-help-text">
+                      这段内容会作为 system message 注入每次聊天请求。语气、身份、回答边界都可以在这里手动调整。
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {activeSection === "model" && (
+                <div className="settings-form">
+                  <div className="settings-checklist">
+                    <div className={`check-item ${selectedConfig.base_url.trim() ? "is-done" : ""}`}>
+                      1. 已填写请求地址
+                    </div>
+                    <div className={`check-item ${selectedConfig.api_key.trim() ? "is-done" : ""}`}>
+                      2. 已填写 API Key
+                    </div>
+                    <div className={`check-item ${selectedConfig.model.trim() ? "is-done" : ""}`}>
+                      3. 已填写模型名称
+                    </div>
+                  </div>
+
+                  <div className="settings-field settings-field--wide">
+                    <div className="settings-field__header">
+                      <div>
+                        <p className="section-kicker">Provider</p>
+                        <h3>选择模型供应商</h3>
+                      </div>
+                      <button type="button" className="ghost-button" onClick={addCustomProvider}>
+                        添加供应商
+                      </button>
+                    </div>
+
+                    <label htmlFor="settings-model-provider">当前供应商</label>
+                    <select
+                      id="settings-model-provider"
+                      className="settings-input"
+                      value={selectedModel}
+                      onChange={(event) => {
+                        setSelectedModel(event.target.value as ModelType);
+                        setMessage("");
+                        setError("");
+                      }}
+                    >
+                      {modelOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label} · {option.provider}
+                        </option>
+                      ))}
+                    </select>
+
+                    <p className="settings-help-text">
+                      当前正在编辑：{selectedMeta.label}，{selectedMeta.description}
+                    </p>
+                  </div>
+
               {isCustomProviderSelected && (
-                <div className="settings-field">
+                <div className="settings-field settings-field--wide">
                   <label htmlFor="custom-provider-label">供应商名称</label>
                   <input
                     id="custom-provider-label"
@@ -753,7 +921,7 @@ function Settings() {
                 </p>
               </div>
 
-              <div className="settings-field">
+              <div className="settings-field settings-field--wide">
                 <label htmlFor="model-name">模型名称</label>
                 <select
                   id="model-name"
@@ -793,20 +961,11 @@ function Settings() {
                 </p>
               </div>
 
-              <div className="settings-checklist">
-                <div className={`check-item ${selectedConfig.base_url.trim() ? "is-done" : ""}`}>
-                  1. 已填写请求地址
                 </div>
-                <div className={`check-item ${selectedConfig.api_key.trim() ? "is-done" : ""}`}>
-                  2. 已填写 API Key
-                </div>
-                <div className={`check-item ${selectedConfig.model.trim() ? "is-done" : ""}`}>
-                  3. 已填写模型名称
-                </div>
-              </div>
-            </div>
+              )}
+            </>
           )}
-          {!loading && (
+          {!loading && activeSection === "speech" && (
             <section className="speech-settings-panel">
               <div className="section-heading">
                 <div>
@@ -1077,29 +1236,6 @@ function Settings() {
               </div>
             </section>
           )}
-
-          {!loading && (
-            <section className="persona-settings-panel">
-              <div className="settings-field">
-                <div>
-                  <p className="section-kicker">Persona</p>
-                  <h3>AI 人设</h3>
-                </div>
-
-                <label htmlFor="persona-prompt">后台人设提示词</label>
-                <textarea
-                  id="persona-prompt"
-                  className="settings-input settings-textarea persona-textarea"
-                  value={config.persona.prompt}
-                  placeholder="例如：你是一个温和、清晰、可靠的桌面 AI 助手，回答直接、有条理。"
-                  onChange={(event) => updatePersonaPrompt(event.target.value)}
-                />
-                <p className="settings-help-text">
-                  这段内容会作为 system message 注入每次聊天请求。语气、身份、回答边界都可以在这里手动调整。
-                </p>
-              </div>
-            </section>
-          )}
         </main>
       </div>
 
@@ -1244,86 +1380,6 @@ function Settings() {
         </div>
       )}
 
-      {webDavDialogOpen && (
-        <div className="settings-modal-backdrop" role="presentation">
-          <div className="settings-modal settings-modal--wide" role="dialog" aria-modal="true">
-            <div>
-              <p className="section-kicker">WebDAV</p>
-              <h2>WebDAV 配置</h2>
-              <p className="settings-help-text">
-                WebDAV 配置只保存在本机配置中，不会出现在导入/导出的备份内容里。
-              </p>
-            </div>
-
-            <div className="settings-modal-form">
-              <label htmlFor="webdav-url">WebDAV 地址</label>
-              <input
-                id="webdav-url"
-                className="settings-input"
-                type="text"
-                value={config.webdav.url}
-                placeholder="例如 https://example.com/dav/backups"
-                onChange={(event) => updateWebDavField("url", event.target.value)}
-              />
-
-              <label htmlFor="webdav-path">备份文件路径</label>
-              <input
-                id="webdav-path"
-                className="settings-input"
-                type="text"
-                value={config.webdav.path}
-                placeholder="munan-ai-settings.json"
-                onChange={(event) => updateWebDavField("path", event.target.value)}
-              />
-
-              <label htmlFor="webdav-username">用户名</label>
-              <input
-                id="webdav-username"
-                className="settings-input"
-                type="text"
-                value={config.webdav.username}
-                placeholder="WebDAV 用户名，可留空"
-                onChange={(event) => updateWebDavField("username", event.target.value)}
-              />
-
-              <label htmlFor="webdav-password">密码</label>
-              <div className="password-input-row">
-                <input
-                  id="webdav-password"
-                  className="settings-input"
-                  type={passwordInputType("webdav-password")}
-                  value={config.webdav.password}
-                  placeholder="WebDAV 密码或应用专用密码"
-                  onChange={(event) => updateWebDavField("password", event.target.value)}
-                />
-                <button
-                  type="button"
-                  className="password-toggle-button"
-                  onClick={() => togglePasswordVisibility("webdav-password")}
-                  aria-label={isPasswordVisible("webdav-password") ? "隐藏 WebDAV 密码" : "显示 WebDAV 密码"}
-                  title={isPasswordVisible("webdav-password") ? "隐藏" : "显示"}
-                >
-                  {isPasswordVisible("webdav-password") ? (
-                    <IoEyeOffOutline size={17} />
-                  ) : (
-                    <IoEyeOutline size={17} />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div className="settings-modal-footer">
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => setWebDavDialogOpen(false)}
-              >
-                完成
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

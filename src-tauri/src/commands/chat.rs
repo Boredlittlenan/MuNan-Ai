@@ -1,8 +1,10 @@
 use crate::ai::types::ChatMessage;
 use crate::config::load_config;
 use serde::Serialize;
+use tauri::AppHandle;
 
 const RESPONSE_GUIDE: &str = include_str!("../../prompts/chat_response_guide.md");
+const MAX_CONTEXT_MESSAGES: usize = 80;
 
 #[derive(Debug, Serialize)]
 pub struct ChatReply {
@@ -12,9 +14,14 @@ pub struct ChatReply {
 }
 
 #[tauri::command]
-pub async fn chat_with_ai(messages: Vec<ChatMessage>, model: String) -> Result<ChatReply, String> {
-    let config = load_config()?;
-    let guided_messages = with_response_guidance(messages, config.persona.prompt);
+pub async fn chat_with_ai(
+    app: AppHandle,
+    messages: Vec<ChatMessage>,
+    model: String,
+) -> Result<ChatReply, String> {
+    let config = load_config(&app)?;
+    let guided_messages =
+        with_response_guidance(messages, config.persona.username, config.persona.prompt);
 
     let reply = match model.as_str() {
         "openai" => crate::ai::openai::call_openai(guided_messages, config.openai).await,
@@ -41,8 +48,23 @@ pub async fn chat_with_ai(messages: Vec<ChatMessage>, model: String) -> Result<C
     Ok(parse_chat_reply(&reply))
 }
 
-fn with_response_guidance(messages: Vec<ChatMessage>, persona_prompt: String) -> Vec<ChatMessage> {
-    let mut guided_messages = Vec::with_capacity(messages.len() + 2);
+fn with_response_guidance(
+    messages: Vec<ChatMessage>,
+    username: String,
+    persona_prompt: String,
+) -> Vec<ChatMessage> {
+    let mut guided_messages = Vec::with_capacity(messages.len() + 3);
+
+    let trimmed_username = username.trim();
+    if !trimmed_username.is_empty() {
+        guided_messages.push(ChatMessage {
+            role: "system".into(),
+            content: format!(
+                "用户信息：当前用户的用户名是「{}」。回复时可据此理解称呼与上下文，但不要无意义地反复称呼用户。",
+                trimmed_username
+            ),
+        });
+    }
 
     let trimmed_persona = persona_prompt.trim();
     if !trimmed_persona.is_empty() {
@@ -56,7 +78,8 @@ fn with_response_guidance(messages: Vec<ChatMessage>, persona_prompt: String) ->
         role: "system".into(),
         content: RESPONSE_GUIDE.trim().into(),
     });
-    guided_messages.extend(messages);
+    let context_start = messages.len().saturating_sub(MAX_CONTEXT_MESSAGES);
+    guided_messages.extend(messages.into_iter().skip(context_start));
     guided_messages
 }
 
@@ -69,7 +92,7 @@ fn parse_chat_reply(raw: &str) -> ChatReply {
     ChatReply {
         content: display_text.trim().to_string(),
         tts_text: tts_text.trim().to_string(),
-        original_content: display_text.trim().to_string(),
+        original_content: raw.trim().to_string(),
     }
 }
 

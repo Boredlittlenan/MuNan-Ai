@@ -4,17 +4,18 @@ use reqwest::Method;
 use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
+use tauri::AppHandle;
 
 const DEFAULT_WEBDAV_BACKUP_PATH: &str = "munan-ai-settings.json";
 
 #[tauri::command]
-pub fn load_app_config() -> Result<AppConfig, String> {
-    load_config()
+pub fn load_app_config(app: AppHandle) -> Result<AppConfig, String> {
+    load_config(&app)
 }
 
 #[tauri::command]
-pub fn save_app_config(config: AppConfig) -> Result<(), String> {
-    save_config(&config)
+pub fn save_app_config(app: AppHandle, config: AppConfig) -> Result<(), String> {
+    save_config(&app, &config)
 }
 
 #[tauri::command]

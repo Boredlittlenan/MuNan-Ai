@@ -2,6 +2,7 @@ pub mod ai;
 pub mod commands;
 pub mod config;
 pub mod speech;
+pub mod storage;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -14,6 +15,8 @@ pub fn run() {
             commands::config::import_app_config_from_webdav,
             commands::config::load_app_config,
             commands::config::save_app_config,
+            storage::load_conversations,
+            storage::save_conversations,
             speech::asr::transcribe_audio,
             speech::tts::synthesize_speech,
         ])

@@ -5,6 +5,7 @@ use chrono::Utc;
 use hmac::{Hmac, Mac};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use tauri::AppHandle;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -16,9 +17,10 @@ const TENCENT_CONTENT_TYPE: &str = "application/json; charset=utf-8";
 
 #[tauri::command]
 pub async fn transcribe_audio(
+    app: AppHandle,
     request: TranscribeAudioRequest,
 ) -> Result<TranscribeAudioResponse, String> {
-    let cfg = crate::config::load_config()?.speech.asr;
+    let cfg = crate::config::load_config(&app)?.speech.asr;
 
     match cfg.provider.trim() {
         "tencent" => transcribe_with_tencent(&cfg, request).await,

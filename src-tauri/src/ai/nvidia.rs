@@ -23,7 +23,7 @@ pub async fn call_nvidia(messages: Vec<ChatMessage>, cfg: ModelConfig) -> Result
         .build()
         .map_err(|error| format!("创建 NVIDIA HTTP 客户端失败: {}", error))?;
     let response = client
-        .post(&cfg.base_url)
+        .post(normalize_chat_url(&cfg.base_url))
         .header("Authorization", format!("Bearer {}", cfg.api_key))
         .header("Accept", "text/event-stream")
         .json(&body)
@@ -98,6 +98,16 @@ pub async fn call_nvidia(messages: Vec<ChatMessage>, cfg: ModelConfig) -> Result
     }
 
     Ok(content)
+}
+
+fn normalize_chat_url(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+
+    if trimmed.ends_with("/chat/completions") {
+        trimmed.to_string()
+    } else {
+        format!("{}/chat/completions", trimmed)
+    }
 }
 
 fn append_stream_content(data: &str, content: &mut String) -> Result<(), String> {

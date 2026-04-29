@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
+
+const CONFIG_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ModelConfig {
@@ -98,6 +101,8 @@ pub struct TtsConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PersonaConfig {
+    #[serde(default)]
+    pub username: String,
     #[serde(default = "default_persona_prompt")]
     pub prompt: String,
 }
@@ -105,6 +110,7 @@ pub struct PersonaConfig {
 impl Default for PersonaConfig {
     fn default() -> Self {
         Self {
+            username: String::new(),
             prompt: default_persona_prompt(),
         }
     }
@@ -130,8 +136,10 @@ fn default_webdav_path() -> String {
     "munan-ai-settings.json".into()
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
     #[serde(default)]
     pub openai: ModelConfig,
     #[serde(default)]
@@ -140,7 +148,7 @@ pub struct AppConfig {
     pub qwen: ModelConfig,
     #[serde(default)]
     pub mimo: ModelConfig,
-    #[serde(default)]
+    #[serde(default = "default_nvidia_config")]
     pub nvidia: ModelConfig,
     #[serde(default)]
     pub speech: SpeechConfig,
@@ -154,7 +162,54 @@ pub struct AppConfig {
     pub custom_providers: Vec<CustomProviderConfig>,
 }
 
-fn config_path_candidates() -> Vec<PathBuf> {
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            schema_version: CONFIG_SCHEMA_VERSION,
+            openai: ModelConfig::default(),
+            deepseek: ModelConfig::default(),
+            qwen: ModelConfig::default(),
+            mimo: ModelConfig::default(),
+            nvidia: default_nvidia_config(),
+            speech: SpeechConfig::default(),
+            persona: PersonaConfig::default(),
+            webdav: WebDavConfig::default(),
+            custom_models: HashMap::new(),
+            custom_providers: Vec::new(),
+        }
+    }
+}
+
+fn default_schema_version() -> u32 {
+    CONFIG_SCHEMA_VERSION
+}
+
+fn default_nvidia_config() -> ModelConfig {
+    ModelConfig {
+        base_url: "https://integrate.api.nvidia.com/v1/chat/completions".into(),
+        api_key: String::new(),
+        model: String::new(),
+    }
+}
+
+pub fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .or_else(|_| app.path().app_config_dir())
+        .map_err(|error| format!("无法定位应用数据目录: {}", error))?;
+
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("创建应用数据目录失败 ({}): {}", dir.display(), error))?;
+
+    Ok(dir)
+}
+
+fn config_file_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join("config.json"))
+}
+
+fn legacy_config_path_candidates() -> Vec<PathBuf> {
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     vec![
@@ -165,28 +220,13 @@ fn config_path_candidates() -> Vec<PathBuf> {
     ]
 }
 
-fn default_config_path() -> PathBuf {
-    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-
-    if current_dir.join("src-tauri").exists() {
-        current_dir.join("src-tauri").join("config.local.json")
-    } else {
-        current_dir.join("config.local.json")
-    }
-}
-
-fn resolve_config_path() -> PathBuf {
-    config_path_candidates()
-        .into_iter()
-        .find(|path| path.exists())
-        .unwrap_or_else(default_config_path)
-}
-
-pub fn load_config() -> Result<AppConfig, String> {
-    let path = resolve_config_path();
+pub fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
+    let path = config_file_path(app)?;
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(AppConfig::default()),
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return load_legacy_config(app, &path);
+        }
         Err(error) => {
             return Err(format!("读取配置文件失败 ({}): {}", path.display(), error));
         }
@@ -196,10 +236,39 @@ pub fn load_config() -> Result<AppConfig, String> {
         .map_err(|error| format!("配置文件解析失败 ({}): {}", path.display(), error))
 }
 
-pub fn save_config(config: &AppConfig) -> Result<(), String> {
-    let path = resolve_config_path();
+fn load_legacy_config(app: &AppHandle, target_path: &PathBuf) -> Result<AppConfig, String> {
+    let Some(legacy_path) = legacy_config_path_candidates()
+        .into_iter()
+        .find(|path| path.exists())
+    else {
+        return Ok(AppConfig::default());
+    };
+
+    let text = fs::read_to_string(&legacy_path)
+        .map_err(|error| format!("读取旧配置文件失败 ({}): {}", legacy_path.display(), error))?;
+    let config: AppConfig = serde_json::from_str(&text)
+        .map_err(|error| format!("旧配置文件解析失败 ({}): {}", legacy_path.display(), error))?;
+
+    save_config(app, &config)?;
+    if !target_path.exists() {
+        return Err(format!(
+            "旧配置迁移失败，目标配置未生成: {}",
+            target_path.display()
+        ));
+    }
+
+    Ok(config)
+}
+
+pub fn save_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    let path = config_file_path(app)?;
     let content = serde_json::to_string_pretty(config)
         .map_err(|error| format!("配置序列化失败: {}", error))?;
+
+    if path.exists() {
+        let backup_path = path.with_extension("json.bak");
+        let _ = fs::copy(&path, backup_path);
+    }
 
     fs::write(&path, content)
         .map_err(|error| format!("写入配置文件失败 ({}): {}", path.display(), error))

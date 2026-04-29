@@ -1,11 +1,13 @@
 use crate::speech::types::{SynthesizeSpeechRequest, SynthesizeSpeechResponse};
 use serde_json::{json, Value};
+use tauri::AppHandle;
 
 #[tauri::command]
 pub async fn synthesize_speech(
+    app: AppHandle,
     request: SynthesizeSpeechRequest,
 ) -> Result<SynthesizeSpeechResponse, String> {
-    let cfg = crate::config::load_config()?.speech.tts;
+    let cfg = crate::config::load_config(&app)?.speech.tts;
     let model = cfg.model.trim();
     let is_voice_design = model.to_ascii_lowercase().contains("voicedesign");
     let format = request
