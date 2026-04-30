@@ -142,7 +142,24 @@ export function ChatMessageBubble({
             </div>
           </div>
         ) : (
-          <p>{message.content}</p>
+          <>
+            {message.content && <p>{message.content}</p>}
+            {message.attachments && message.attachments.length > 0 && (
+              <div className="message-attachment-grid">
+                {message.attachments.map((attachment) => (
+                  <a
+                    key={attachment.id}
+                    className="message-image-link"
+                    href={attachment.data_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img src={attachment.data_url} alt={attachment.name} />
+                  </a>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {isAiReply && isOriginalExpanded && (

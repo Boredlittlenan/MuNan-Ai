@@ -192,17 +192,17 @@ async fn transcribe_with_tencent(
     });
     let payload = serde_json::to_string(&body)
         .map_err(|error| format!("腾讯云 ASR 请求序列化失败: {}", error))?;
-    let authorization = tencent_authorization(
+    let authorization = tencent_authorization(TencentSignatureInput {
         secret_id,
         secret_key,
-        &host,
-        &canonical_uri,
-        &canonical_querystring,
-        TENCENT_ASR_ACTION,
-        &payload,
+        host: &host,
+        canonical_uri: &canonical_uri,
+        canonical_querystring: &canonical_querystring,
+        action: TENCENT_ASR_ACTION,
+        payload: &payload,
         timestamp,
-        &date,
-    )?;
+        date: &date,
+    })?;
 
     let client = reqwest::Client::new();
     let mut request_builder = client
@@ -258,50 +258,55 @@ fn voice_format_from_mime(mime_type: &str) -> &'static str {
     }
 }
 
-fn tencent_authorization(
-    secret_id: &str,
-    secret_key: &str,
-    host: &str,
-    canonical_uri: &str,
-    canonical_querystring: &str,
-    action: &str,
-    payload: &str,
+struct TencentSignatureInput<'a> {
+    secret_id: &'a str,
+    secret_key: &'a str,
+    host: &'a str,
+    canonical_uri: &'a str,
+    canonical_querystring: &'a str,
+    action: &'a str,
+    payload: &'a str,
     timestamp: i64,
-    date: &str,
-) -> Result<String, String> {
+    date: &'a str,
+}
+
+fn tencent_authorization(input: TencentSignatureInput<'_>) -> Result<String, String> {
     let http_request_method = "POST";
     let canonical_headers = format!(
         "content-type:{}\nhost:{}\nx-tc-action:{}\n",
         TENCENT_CONTENT_TYPE,
-        host,
-        action.to_ascii_lowercase()
+        input.host,
+        input.action.to_ascii_lowercase()
     );
     let signed_headers = "content-type;host;x-tc-action";
-    let hashed_request_payload = sha256_hex(payload.as_bytes());
+    let hashed_request_payload = sha256_hex(input.payload.as_bytes());
     let canonical_request = format!(
         "{}\n{}\n{}\n{}\n{}\n{}",
         http_request_method,
-        canonical_uri,
-        canonical_querystring,
+        input.canonical_uri,
+        input.canonical_querystring,
         canonical_headers,
         signed_headers,
         hashed_request_payload
     );
-    let credential_scope = format!("{}/{}/tc3_request", date, TENCENT_ASR_SERVICE);
+    let credential_scope = format!("{}/{}/tc3_request", input.date, TENCENT_ASR_SERVICE);
     let string_to_sign = format!(
         "TC3-HMAC-SHA256\n{}\n{}\n{}",
-        timestamp,
+        input.timestamp,
         credential_scope,
         sha256_hex(canonical_request.as_bytes())
     );
-    let secret_date = hmac_sha256(format!("TC3{}", secret_key).as_bytes(), date.as_bytes())?;
+    let secret_date = hmac_sha256(
+        format!("TC3{}", input.secret_key).as_bytes(),
+        input.date.as_bytes(),
+    )?;
     let secret_service = hmac_sha256(&secret_date, TENCENT_ASR_SERVICE.as_bytes())?;
     let secret_signing = hmac_sha256(&secret_service, b"tc3_request")?;
     let signature = hex::encode(hmac_sha256(&secret_signing, string_to_sign.as_bytes())?);
 
     Ok(format!(
         "TC3-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
-        secret_id, credential_scope, signed_headers, signature
+        input.secret_id, credential_scope, signed_headers, signature
     ))
 }
 

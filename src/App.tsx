@@ -7,6 +7,7 @@ import {
   IoClose,
   IoMenu,
   IoMic,
+  IoImageOutline,
   IoSettingsSharp,
   IoStopCircleOutline,
   IoTrashOutline,
@@ -24,6 +25,7 @@ import {
   type AppConfig,
   type Conversation,
   type Message,
+  type MessageAttachment,
   type ModelType,
   clearLegacyConversationsStorage,
   createEmptyAppConfig,
@@ -56,6 +58,9 @@ type ChatReplyResponse = {
   tts_text: string;
   original_content: string;
 };
+
+const MAX_IMAGE_ATTACHMENTS = 4;
+const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
 
 /* =========================
    页面职责说明
@@ -100,6 +105,7 @@ function App() {
    * loading 为 true 时会禁用输入，避免重复提交。
    */
   const [input, setInput] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<MessageAttachment[]>([]);
   const [loading, setLoading] = useState(false);
 
   /**
@@ -128,6 +134,7 @@ function App() {
    * 聊天区底部锚点，用于每次发送和收到消息后自动滚动到底部。
    */
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
@@ -145,6 +152,7 @@ function App() {
   const modelOptions = useMemo(() => getModelOptions(appConfig), [appConfig]);
   const currentModelMeta = useMemo(() => getModelMeta(appConfig, model), [appConfig, model]);
   const currentProviderConfig = useMemo(() => getModelConfig(appConfig, model), [appConfig, model]);
+  const currentModelMultimodal = currentProviderConfig.is_multimodal;
 
   const currentConversation = useMemo(
     () =>
@@ -281,6 +289,12 @@ function App() {
     saveUserState(model, currentConversationId);
   }, [model, currentConversationId]);
 
+  useEffect(() => {
+    if (!currentModelMultimodal && pendingAttachments.length > 0) {
+      setPendingAttachments([]);
+    }
+  }, [currentModelMultimodal, pendingAttachments.length]);
+
   /**
    * 当用户切换模型时，检查当前会话 ID 是否仍然有效。
    * 这是之前容易出问题的地方：旧模型的会话 ID 在新模型里不存在，会导致右侧空白。
@@ -332,6 +346,58 @@ function App() {
     } catch (error) {
       setConfigError(`模型切换保存失败：${String(error)}`);
     }
+  };
+
+  const addImageAttachments = async (files: FileList | null) => {
+    if (!files?.length) {
+      return;
+    }
+
+    if (!currentModelMultimodal) {
+      setSpeechError("当前模型未开启多模态能力，请先在设置页开启后再发送图片。");
+      return;
+    }
+
+    try {
+      const remainingSlots = MAX_IMAGE_ATTACHMENTS - pendingAttachments.length;
+      const selectedFiles = Array.from(files).slice(0, Math.max(remainingSlots, 0));
+      const nextAttachments = await Promise.all(
+        selectedFiles.map(async (file) => {
+          if (!file.type.startsWith("image/")) {
+            throw new Error(`${file.name} 不是图片文件。`);
+          }
+
+          if (file.size > MAX_IMAGE_SIZE) {
+            throw new Error(`${file.name} 超过 8MB。`);
+          }
+
+          return {
+            id: `image-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            type: "image" as const,
+            name: file.name,
+            mime_type: file.type || "image/png",
+            data_url: await fileToDataUrl(file),
+          };
+        })
+      );
+
+      setPendingAttachments((current) =>
+        [...current, ...nextAttachments].slice(0, MAX_IMAGE_ATTACHMENTS)
+      );
+      setSpeechError("");
+    } catch (error) {
+      setSpeechError(`图片添加失败：${String(error)}`);
+    } finally {
+      if (imageInputRef.current) {
+        imageInputRef.current.value = "";
+      }
+    }
+  };
+
+  const removePendingAttachment = (attachmentId: string) => {
+    setPendingAttachments((current) =>
+      current.filter((attachment) => attachment.id !== attachmentId)
+    );
   };
 
   /**
@@ -403,7 +469,17 @@ function App() {
    * 3. 成功时写入 AI 回复，失败时写入错误提示气泡。
    */
   const sendMessage = async () => {
-    if (!input.trim() || loading || !currentModelReady || !conversationsReady) {
+    if (
+      (!input.trim() && pendingAttachments.length === 0) ||
+      loading ||
+      !currentModelReady ||
+      !conversationsReady
+    ) {
+      return;
+    }
+
+    if (pendingAttachments.length > 0 && !currentModelMultimodal) {
+      setSpeechError("当前模型未开启多模态能力，不能发送图片。");
       return;
     }
 
@@ -423,6 +499,7 @@ function App() {
     const userMessage: Message = {
       role: "user",
       content: input.trim(),
+      attachments: pendingAttachments,
     };
 
     const optimisticMessages = [...activeConversation.messages, userMessage];
@@ -443,18 +520,18 @@ function App() {
     setCurrentConversationId(activeConversation.id);
 
     setInput("");
+    setPendingAttachments([]);
     setLoading(true);
 
     try {
-      const apiMessages = optimisticMessages.map((message) => ({
-        role: message.role === "ai" ? "assistant" : "user",
-        content: message.content,
-      }));
+      const apiMessages = optimisticMessages.map(toApiMessage);
 
       const reply = await invoke<ChatReplyResponse>("chat_with_ai", {
         model,
         messages: apiMessages,
       });
+      const replyImages = extractImageAttachments(reply.content);
+      const replyContent = stripImageMarkdown(reply.content);
 
       setConversations((previous) => ({
         ...previous,
@@ -467,9 +544,10 @@ function App() {
                   ...optimisticMessages,
                   {
                     role: "ai",
-                    content: reply.content,
+                    content: replyContent || reply.content,
                     tts_text: reply.tts_text,
                     original_content: reply.original_content || reply.content,
+                    attachments: replyImages,
                   },
                 ],
               }
@@ -1019,6 +1097,32 @@ function App() {
                 }}
               />
 
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden-file-input"
+                onChange={(event) => void addImageAttachments(event.target.files)}
+              />
+
+              <button
+                type="button"
+                className="ghost-button image-attach-button"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={
+                  loading ||
+                  !currentModelReady ||
+                  !conversationsReady ||
+                  !currentModelMultimodal ||
+                  pendingAttachments.length >= MAX_IMAGE_ATTACHMENTS
+                }
+                title={currentModelMultimodal ? "添加图片" : "当前模型未开启多模态"}
+                aria-label={currentModelMultimodal ? "添加图片" : "当前模型未开启多模态"}
+              >
+                <IoImageOutline size={20} />
+              </button>
+
               <button
                 type="button"
                 className={`ghost-button record-button ${
@@ -1059,6 +1163,7 @@ function App() {
                 onClick={() => void sendMessage()}
                 disabled={
                   loading ||
+                  (!input.trim() && pendingAttachments.length === 0) ||
                   !currentModelReady ||
                   !conversationsReady ||
                   recordingState !== "idle"
@@ -1067,6 +1172,25 @@ function App() {
                 {loading ? "发送中..." : "发送"}
               </button>
             </div>
+
+            {pendingAttachments.length > 0 && (
+              <div className="attachment-preview-list">
+                {pendingAttachments.map((attachment) => (
+                  <div className="attachment-preview" key={attachment.id}>
+                    <img src={attachment.data_url} alt={attachment.name} />
+                    <button
+                      type="button"
+                      className="attachment-remove-button"
+                      onClick={() => removePendingAttachment(attachment.id)}
+                      aria-label={`移除图片 ${attachment.name}`}
+                      title="移除"
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </main>
       </div>
@@ -1075,3 +1199,64 @@ function App() {
 }
 
 export default App;
+
+const fileToDataUrl = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(reader.error ?? new Error("读取图片失败"));
+    reader.readAsDataURL(file);
+  });
+};
+
+const toApiMessage = (message: Message) => {
+  if (message.role === "user" && message.attachments?.length) {
+    return {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: message.content || "请根据图片内容继续回答。",
+        },
+        ...message.attachments.map((attachment) => ({
+          type: "image_url",
+          image_url: {
+            url: attachment.data_url,
+          },
+        })),
+      ],
+    };
+  }
+
+  return {
+    role: message.role === "ai" ? "assistant" : "user",
+    content: message.content,
+  };
+};
+
+const extractImageAttachments = (content: string): MessageAttachment[] => {
+  const attachments: MessageAttachment[] = [];
+  const pattern = markdownImagePattern();
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(content)) !== null) {
+    attachments.push({
+      id: `reply-image-${attachments.length}-${Date.now()}`,
+      type: "image",
+      name: match[1] || "AI 图片",
+      mime_type: match[2].startsWith("data:image/")
+        ? match[2].slice(5, match[2].indexOf(";"))
+        : "image",
+      data_url: match[2],
+    });
+  }
+
+  return attachments;
+};
+
+const stripImageMarkdown = (content: string): string => {
+  return content.replace(markdownImagePattern(), "").trim();
+};
+
+const markdownImagePattern = () =>
+  /!\[([^\]]*)\]\((data:image\/[^)]+|https?:\/\/[^)\s]+)\)/g;

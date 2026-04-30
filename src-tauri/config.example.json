@@ -3,27 +3,32 @@
   "openai": {
     "base_url": "https://api.openai.com/v1/chat/completions",
     "api_key": "",
-    "model": "gpt-4o-mini"
+    "model": "gpt-4o-mini",
+    "is_multimodal": false
   },
   "deepseek": {
     "base_url": "https://api.deepseek.com/v1/chat/completions",
     "api_key": "",
-    "model": "deepseek-chat"
+    "model": "deepseek-chat",
+    "is_multimodal": false
   },
   "qwen": {
     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
     "api_key": "",
-    "model": "qwen-max"
+    "model": "qwen-max",
+    "is_multimodal": false
   },
   "mimo": {
     "base_url": "https://api.xiaomimimo.com/v1/chat/completions",
     "api_key": "",
-    "model": "mimo-v2-flash"
+    "model": "mimo-v2-flash",
+    "is_multimodal": false
   },
   "nvidia": {
     "base_url": "https://integrate.api.nvidia.com/v1/chat/completions",
     "api_key": "",
-    "model": "moonshotai/kimi-k2.5"
+    "model": "moonshotai/kimi-k2.5",
+    "is_multimodal": false
   },
   "speech": {
     "asr": {

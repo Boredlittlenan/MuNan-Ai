@@ -59,10 +59,10 @@ fn with_response_guidance(
     if !trimmed_username.is_empty() {
         guided_messages.push(ChatMessage {
             role: "system".into(),
-            content: format!(
+            content: serde_json::Value::String(format!(
                 "用户信息：当前用户的用户名是「{}」。回复时可据此理解称呼与上下文，但不要无意义地反复称呼用户。",
                 trimmed_username
-            ),
+            )),
         });
     }
 
@@ -70,13 +70,13 @@ fn with_response_guidance(
     if !trimmed_persona.is_empty() {
         guided_messages.push(ChatMessage {
             role: "system".into(),
-            content: format!("人设与行为要求：\n{}", trimmed_persona),
+            content: serde_json::Value::String(format!("人设与行为要求：\n{}", trimmed_persona)),
         });
     }
 
     guided_messages.push(ChatMessage {
         role: "system".into(),
-        content: RESPONSE_GUIDE.trim().into(),
+        content: serde_json::Value::String(RESPONSE_GUIDE.trim().into()),
     });
     let context_start = messages.len().saturating_sub(MAX_CONTEXT_MESSAGES);
     guided_messages.extend(messages.into_iter().skip(context_start));

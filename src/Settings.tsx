@@ -166,8 +166,8 @@ function Settings() {
    * 这样模型切换再频繁，也不会因为闭包拿错值而更新到别的模型上。
    */
   const updateSelectedModelField = (
-    field: "base_url" | "api_key" | "model",
-    value: string
+    field: "base_url" | "api_key" | "model" | "is_multimodal",
+    value: string | boolean
   ) => {
     setConfig((previous) => updateModelConfig(previous, selectedModel, { [field]: value }));
   };
@@ -284,6 +284,7 @@ function Settings() {
         base_url: "",
         api_key: "",
         model: "",
+        is_multimodal: false,
       })
     );
     setExportedConfigPath("");
@@ -326,6 +327,7 @@ function Settings() {
           base_url: "",
           api_key: "",
           model: "",
+          is_multimodal: false,
           custom_models: [],
         },
       ],
@@ -918,6 +920,28 @@ function Settings() {
                 </div>
                 <p className="settings-help-text">
                   已改为密码输入框，避免在桌面环境里直接把密钥裸露在页面上。
+                </p>
+              </div>
+
+              <div className="settings-field">
+                <div className="settings-field__header">
+                  <div>
+                    <p className="section-kicker">Vision</p>
+                    <h3>多模态能力</h3>
+                  </div>
+                  <label className="settings-switch">
+                    <input
+                      type="checkbox"
+                      checked={selectedConfig.is_multimodal}
+                      onChange={(event) =>
+                        updateSelectedModelField("is_multimodal", event.target.checked)
+                      }
+                    />
+                    <span />
+                  </label>
+                </div>
+                <p className="settings-help-text">
+                  开启后聊天输入区允许附加图片，并按 OpenAI-compatible 视觉消息格式发送。
                 </p>
               </div>
 

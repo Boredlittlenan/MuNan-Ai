@@ -44,14 +44,53 @@ pub async fn chat_api(
     let json: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("JSON 解析失败: {}\n原始响应: {}", e, text))?;
 
-    let content = json
+    let message = json
         .get("choices")
         .and_then(|c| c.get(0))
         .and_then(|m| m.get("message"))
-        .and_then(|msg| msg.get("content"))
-        .and_then(|s| s.as_str())
-        .unwrap_or("")
-        .to_string();
+        .ok_or_else(|| format!("响应中没有找到 message\n原始响应: {}", text))?;
+    let content = extract_message_content(message);
 
     Ok(content)
+}
+
+fn extract_message_content(message: &serde_json::Value) -> String {
+    let Some(content) = message.get("content") else {
+        return String::new();
+    };
+
+    if let Some(text) = content.as_str() {
+        return text.to_string();
+    }
+
+    let Some(parts) = content.as_array() else {
+        return String::new();
+    };
+
+    parts
+        .iter()
+        .filter_map(|part| {
+            let part_type = part
+                .get("type")
+                .and_then(|item| item.as_str())
+                .unwrap_or_default();
+
+            match part_type {
+                "text" | "output_text" => part
+                    .get("text")
+                    .and_then(|item| item.as_str())
+                    .map(str::to_string),
+                "image_url" => part
+                    .get("image_url")
+                    .and_then(|item| {
+                        item.get("url")
+                            .and_then(|url| url.as_str())
+                            .or_else(|| item.as_str())
+                    })
+                    .map(|url| format!("![AI 图片]({})", url)),
+                _ => None,
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

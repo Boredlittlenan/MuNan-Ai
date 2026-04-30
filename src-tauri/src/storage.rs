@@ -1,6 +1,7 @@
 use crate::config::app_data_dir;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use tauri::AppHandle;
 
@@ -12,6 +13,17 @@ pub struct StoredMessage {
     pub tts_text: Option<String>,
     #[serde(default)]
     pub original_content: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<StoredAttachment>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct StoredAttachment {
+    pub id: String,
+    pub r#type: String,
+    pub name: String,
+    pub mime_type: String,
+    pub data_url: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -131,15 +143,16 @@ pub fn save_conversations(
 
                 tx.execute(
                     "INSERT INTO messages
-                     (conversation_id, message_index, role, content, tts_text, original_content)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                     (conversation_id, message_index, role, content, tts_text, original_content, attachments)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
                         conversation.id,
                         index as i64,
                         message.role,
                         message.content,
                         message.tts_text,
-                        message.original_content
+                        message.original_content,
+                        serialize_attachments(&message.attachments)?
                     ],
                 )
                 .map_err(|error| format!("保存会话消息失败: {}", error))?;
@@ -178,6 +191,7 @@ fn init_conversation_db(conn: &Connection) -> Result<(), String> {
             content TEXT NOT NULL,
             tts_text TEXT,
             original_content TEXT,
+            attachments TEXT NOT NULL DEFAULT '[]',
             PRIMARY KEY (conversation_id, message_index),
             FOREIGN KEY (conversation_id)
                 REFERENCES conversations(id)
@@ -187,13 +201,14 @@ fn init_conversation_db(conn: &Connection) -> Result<(), String> {
             ON conversations(model, updated_at DESC);
         ",
     )
-    .map_err(|error| format!("初始化会话数据库失败: {}", error))
+    .map_err(|error| format!("初始化会话数据库失败: {}", error))?;
+    ensure_messages_attachments_column(conn)
 }
 
 fn load_messages(conn: &Connection, conversation_id: &str) -> Result<Vec<StoredMessage>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT role, content, tts_text, original_content
+            "SELECT role, content, tts_text, original_content, attachments
              FROM messages
              WHERE conversation_id = ?1
              ORDER BY message_index ASC",
@@ -206,6 +221,7 @@ fn load_messages(conn: &Connection, conversation_id: &str) -> Result<Vec<StoredM
                 content: row.get(1)?,
                 tts_text: row.get(2)?,
                 original_content: row.get(3)?,
+                attachments: deserialize_attachments(row.get::<_, String>(4)?.as_str()),
             })
         })
         .map_err(|error| format!("查询会话消息失败: {}", error))?;
@@ -216,4 +232,50 @@ fn load_messages(conn: &Connection, conversation_id: &str) -> Result<Vec<StoredM
     }
 
     Ok(messages)
+}
+
+fn ensure_messages_attachments_column(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(messages)")
+        .map_err(|error| format!("检查消息表结构失败: {}", error))?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("读取消息表结构失败: {}", error))?;
+
+    for column in columns {
+        if column.map_err(|error| format!("解析消息表结构失败: {}", error))? == "attachments"
+        {
+            return Ok(());
+        }
+    }
+
+    conn.execute(
+        "ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'",
+        [],
+    )
+    .map_err(|error| format!("升级消息表结构失败: {}", error))?;
+
+    Ok(())
+}
+
+fn serialize_attachments(attachments: &[StoredAttachment]) -> Result<String, String> {
+    serde_json::to_string(attachments).map_err(|error| format!("序列化消息附件失败: {}", error))
+}
+
+fn deserialize_attachments(value: &str) -> Vec<StoredAttachment> {
+    serde_json::from_str::<Vec<StoredAttachment>>(value)
+        .or_else(|_| {
+            serde_json::from_str::<Value>(value).map(|value| {
+                value
+                    .as_array()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| serde_json::from_value(item.clone()).ok())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            })
+        })
+        .unwrap_or_default()
 }

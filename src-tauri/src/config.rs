@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 const CONFIG_SCHEMA_VERSION: u32 = 1;
@@ -12,6 +12,8 @@ pub struct ModelConfig {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    #[serde(default)]
+    pub is_multimodal: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -26,6 +28,8 @@ pub struct CustomProviderConfig {
     pub api_key: String,
     #[serde(default)]
     pub model: String,
+    #[serde(default)]
+    pub is_multimodal: bool,
     #[serde(default)]
     pub custom_models: Vec<String>,
 }
@@ -189,6 +193,7 @@ fn default_nvidia_config() -> ModelConfig {
         base_url: "https://integrate.api.nvidia.com/v1/chat/completions".into(),
         api_key: String::new(),
         model: String::new(),
+        is_multimodal: false,
     }
 }
 
@@ -236,7 +241,7 @@ pub fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
         .map_err(|error| format!("配置文件解析失败 ({}): {}", path.display(), error))
 }
 
-fn load_legacy_config(app: &AppHandle, target_path: &PathBuf) -> Result<AppConfig, String> {
+fn load_legacy_config(app: &AppHandle, target_path: &Path) -> Result<AppConfig, String> {
     let Some(legacy_path) = legacy_config_path_candidates()
         .into_iter()
         .find(|path| path.exists())

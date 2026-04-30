@@ -3,9 +3,10 @@
 ## Frontend
 
 - `src/App.tsx`: chat workspace UI and conversation state.
-- `src/Settings.tsx`: model configuration UI.
+- `src/App.tsx`: also handles multimodal image attachments for models marked with `is_multimodal`.
+- `src/Settings.tsx`: model configuration UI, including the per-model multimodal toggle.
 - `src/modelConfig.ts`: shared frontend model metadata, storage helpers, and config types.
-- Conversation history loads from Tauri commands and is persisted in backend SQLite; `localStorage` is only used for lightweight UI state and legacy migration.
+- Conversation history loads from Tauri commands and is persisted in backend SQLite, including message image attachment metadata/data; `localStorage` is only used for lightweight UI state and legacy migration.
 - `src/styles/`: page and shared styles.
 
 ## Tauri Backend
@@ -21,6 +22,7 @@
 ## Runtime Config
 
 - Runtime config is saved in the OS app data directory as `config.json`.
+- Chat model configs include `is_multimodal`; when enabled, the frontend sends OpenAI-compatible `image_url` content parts.
 - Use `src-tauri/config.example.json` as the committed template.
 - Old `config.local.json` / `config.json` files in the repo are migrated automatically on first load.
 

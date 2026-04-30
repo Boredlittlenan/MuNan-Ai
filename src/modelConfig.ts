@@ -19,6 +19,15 @@ export type Message = {
   content: string;
   tts_text?: string;
   original_content?: string;
+  attachments?: MessageAttachment[];
+};
+
+export type MessageAttachment = {
+  id: string;
+  type: "image";
+  name: string;
+  mime_type: string;
+  data_url: string;
 };
 
 export type Conversation = {
@@ -31,10 +40,14 @@ export type Conversation = {
   messages: Message[];
 };
 
-export type ModelConfig = {
+export type ApiEndpointConfig = {
   base_url: string;
   api_key: string;
   model: string;
+};
+
+export type ModelConfig = ApiEndpointConfig & {
+  is_multimodal: boolean;
 };
 
 export type CustomProviderConfig = ModelConfig & {
@@ -46,7 +59,7 @@ export type CustomProviderConfig = ModelConfig & {
 
 export type AsrProvider = "openai_like" | "tencent";
 
-export type AsrConfig = ModelConfig & {
+export type AsrConfig = ApiEndpointConfig & {
   provider: AsrProvider;
   tencent_engine_type: string;
   app_id: string;
@@ -55,7 +68,7 @@ export type AsrConfig = ModelConfig & {
   region: string;
 };
 
-export type TtsConfig = ModelConfig & {
+export type TtsConfig = ApiEndpointConfig & {
   voice: string;
   voice_description: string;
 };
@@ -160,11 +173,16 @@ const PREFERRED_MODEL_STORAGE_KEY = "preferredModel";
 
 export const createEmptyAppConfig = (): AppConfig => ({
   schema_version: 1,
-  openai: { base_url: "", api_key: "", model: "" },
-  deepseek: { base_url: "", api_key: "", model: "" },
-  qwen: { base_url: "", api_key: "", model: "" },
-  mimo: { base_url: "", api_key: "", model: "" },
-  nvidia: { base_url: "https://integrate.api.nvidia.com/v1/chat/completions", api_key: "", model: "" },
+  openai: { base_url: "", api_key: "", model: "", is_multimodal: false },
+  deepseek: { base_url: "", api_key: "", model: "", is_multimodal: false },
+  qwen: { base_url: "", api_key: "", model: "", is_multimodal: false },
+  mimo: { base_url: "", api_key: "", model: "", is_multimodal: false },
+  nvidia: {
+    base_url: "https://integrate.api.nvidia.com/v1/chat/completions",
+    api_key: "",
+    model: "",
+    is_multimodal: false,
+  },
   speech: {
     asr: {
       provider: "openai_like",
@@ -177,7 +195,13 @@ export const createEmptyAppConfig = (): AppConfig => ({
       secret_key: "",
       region: "ap-shanghai",
     },
-    tts: { base_url: "", api_key: "", model: "", voice: "", voice_description: "" },
+    tts: {
+      base_url: "",
+      api_key: "",
+      model: "",
+      voice: "",
+      voice_description: "",
+    },
   },
   persona: {
     username: "",
@@ -240,6 +264,7 @@ export const getModelConfig = (config: AppConfig, model: ModelType): ModelConfig
     base_url: provider?.base_url ?? "",
     api_key: provider?.api_key ?? "",
     model: provider?.model ?? "",
+    is_multimodal: provider?.is_multimodal ?? false,
   };
 };
 
@@ -308,6 +333,7 @@ export const normalizeAppConfig = (
       base_url: current?.base_url ?? "",
       api_key: current?.api_key ?? "",
       model: current?.model ?? "",
+      is_multimodal: current?.is_multimodal ?? false,
     };
   }
 
@@ -358,6 +384,7 @@ export const normalizeAppConfig = (
           base_url: provider.base_url ?? "",
           api_key: provider.api_key ?? "",
           model: provider.model ?? "",
+          is_multimodal: provider.is_multimodal ?? false,
           custom_models: Array.isArray(provider.custom_models)
             ? Array.from(new Set(provider.custom_models.filter(Boolean)))
             : [],
@@ -405,6 +432,7 @@ export const normalizeConversations = (
                       content: message.content ?? "",
                       tts_text: message.tts_text,
                       original_content: message.original_content,
+                      attachments: normalizeAttachments(message.attachments),
                     }))
                 : [],
             };
@@ -413,6 +441,29 @@ export const normalizeConversations = (
   }
 
   return fallback;
+};
+
+export const normalizeAttachments = (
+  attachments: MessageAttachment[] | undefined
+): MessageAttachment[] => {
+  return Array.isArray(attachments)
+    ? attachments
+        .filter(
+          (attachment) =>
+            attachment?.type === "image" &&
+            typeof attachment.data_url === "string" &&
+            (attachment.data_url.startsWith("data:image/") ||
+              attachment.data_url.startsWith("https://") ||
+              attachment.data_url.startsWith("http://"))
+        )
+        .map((attachment) => ({
+          id: attachment.id || `image-${Date.now()}`,
+          type: "image",
+          name: attachment.name || "image",
+          mime_type: attachment.mime_type || "image/png",
+          data_url: attachment.data_url,
+        }))
+    : [];
 };
 
 export const hasAnyConversations = (
