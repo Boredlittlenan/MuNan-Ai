@@ -7,18 +7,22 @@
 }
 
 .settings-header {
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
   flex-shrink: 0;
 }
 
 .settings-header__intro {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 14px;
 }
 
 .settings-header__intro .back-button {
   width: auto;
+  min-width: max-content;
 }
 
 .settings-header__actions {
@@ -26,6 +30,7 @@
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+  min-width: 0;
 }
 
 .settings-file-input {
@@ -318,6 +323,11 @@
 .usage-filter-actions {
   display: flex;
   gap: 8px;
+}
+
+.usage-filter-grid > div:nth-child(2) .custom-date__panel {
+  left: auto;
+  right: 0;
 }
 
 .usage-stat-card {
@@ -705,6 +715,10 @@ select.settings-input {
 }
 
 @media (max-width: 760px) {
+  .settings-header {
+    grid-template-columns: 1fr;
+  }
+
   .settings-form {
     grid-template-columns: 1fr;
   }

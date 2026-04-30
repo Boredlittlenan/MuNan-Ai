@@ -16,6 +16,8 @@ import {
 import "./styles/base.css";
 import "./styles/Settings.css";
 
+import { CustomSelect } from "./components/CustomSelect";
+import { DatePicker } from "./components/DatePicker";
 import {
   exportAppConfigBackup,
   exportAppConfigToWebDav,
@@ -771,18 +773,16 @@ function Settings() {
                     </div>
 
                     <label htmlFor="preferred-model">默认模型</label>
-                    <select
+                    <CustomSelect
                       id="preferred-model"
                       className="settings-input"
                       value={preferredModel}
-                      onChange={(event) => setPreferredModel(event.target.value as ModelType)}
-                    >
-                      {modelOptions.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label} · {option.provider}
-                        </option>
-                      ))}
-                    </select>
+                      options={modelOptions.map((option) => ({
+                        value: option.id,
+                        label: `${option.label} · ${option.provider}`,
+                      }))}
+                      onChange={(value) => setPreferredModel(value as ModelType)}
+                    />
                     <p className="settings-help-text">
                       保存设置后，聊天页下次打开会优先使用这个模型。
                     </p>
@@ -895,22 +895,22 @@ function Settings() {
                     <div className="usage-filter-grid">
                       <div>
                         <label htmlFor="usage-start-date">开始日期</label>
-                        <input
+                        <DatePicker
                           id="usage-start-date"
                           className="settings-input"
-                          type="date"
                           value={usageStartDate}
-                          onChange={(event) => setUsageStartDate(event.target.value)}
+                          placeholder="选择开始日期"
+                          onChange={setUsageStartDate}
                         />
                       </div>
                       <div>
                         <label htmlFor="usage-end-date">结束日期</label>
-                        <input
+                        <DatePicker
                           id="usage-end-date"
                           className="settings-input"
-                          type="date"
                           value={usageEndDate}
-                          onChange={(event) => setUsageEndDate(event.target.value)}
+                          placeholder="选择结束日期"
+                          onChange={setUsageEndDate}
                         />
                       </div>
                       <div className="usage-filter-actions">
@@ -1094,22 +1094,20 @@ function Settings() {
                     </div>
 
                     <label htmlFor="settings-model-provider">当前供应商</label>
-                    <select
+                    <CustomSelect
                       id="settings-model-provider"
                       className="settings-input"
                       value={selectedModel}
-                      onChange={(event) => {
-                        setSelectedModel(event.target.value as ModelType);
+                      options={modelOptions.map((option) => ({
+                        value: option.id,
+                        label: `${option.label} · ${option.provider}`,
+                      }))}
+                      onChange={(value) => {
+                        setSelectedModel(value as ModelType);
                         setMessage("");
                         setError("");
                       }}
-                    >
-                      {modelOptions.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label} · {option.provider}
-                        </option>
-                      ))}
-                    </select>
+                    />
 
                     <p className="settings-help-text">
                       当前正在编辑：{selectedMeta.label}，{selectedMeta.description}
@@ -1210,19 +1208,17 @@ function Settings() {
 
               <div className="settings-field settings-field--wide">
                 <label htmlFor="model-name">模型名称</label>
-                <select
+                <CustomSelect
                   id="model-name"
                   className="settings-input"
                   value={selectedConfig.model}
-                  onChange={(event) => updateSelectedModelField("model", event.target.value)}
-                >
-                  <option value="">请选择模型</option>
-                  {selectedModelChoices.map((modelName) => (
-                    <option key={modelName} value={modelName}>
-                      {modelName}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="请选择模型"
+                  options={selectedModelChoices.map((modelName) => ({
+                    value: modelName,
+                    label: modelName,
+                  }))}
+                  onChange={(value) => updateSelectedModelField("model", value)}
+                />
 
                 <div className="custom-model-row">
                   <input
@@ -1269,15 +1265,16 @@ function Settings() {
                   </div>
 
                   <label htmlFor="asr-provider-current">识别服务</label>
-                  <select
+                  <CustomSelect
                     id="asr-provider-current"
                     className="settings-input"
                     value={config.speech.asr.provider}
-                    onChange={(event) => switchAsrProvider(event.target.value as AsrProvider)}
-                  >
-                    <option value="openai_like">OpenAI-like / MIMO</option>
-                    <option value="tencent">腾讯云语音识别</option>
-                  </select>
+                    options={[
+                      { value: "openai_like", label: "OpenAI-like / MIMO" },
+                      { value: "tencent", label: "腾讯云语音识别" },
+                    ]}
+                    onChange={(value) => switchAsrProvider(value as AsrProvider)}
+                  />
 
                   {config.speech.asr.provider === "tencent" ? (
                     <>
@@ -1364,24 +1361,19 @@ function Settings() {
                       />
 
                       <label htmlFor="asr-engine-type-current">识别引擎类型</label>
-                      <select
+                      <CustomSelect
                         id="asr-engine-type-current"
                         className="settings-input"
                         value={config.speech.asr.tencent_engine_type}
-                        onChange={(event) =>
+                        options={TENCENT_ASR_ENGINE_OPTIONS}
+                        onChange={(value) =>
                           updateSpeechField(
                             "asr",
                             "tencent_engine_type",
-                            event.target.value
+                            value
                           )
                         }
-                      >
-                        {TENCENT_ASR_ENGINE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </>
                   ) : (
                     <>

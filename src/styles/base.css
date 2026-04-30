@@ -338,10 +338,12 @@ textarea,
 select {
   width: 100%;
   max-width: 100%;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(122, 139, 163, 0.24);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.9));
   color: var(--text-1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.74);
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease,
@@ -354,25 +356,61 @@ select {
   font-size: 14px;
 }
 
+input::placeholder,
+textarea::placeholder {
+  color: rgba(102, 117, 143, 0.72);
+}
+
 select {
   appearance: none;
   padding-right: 42px;
   background-image:
     linear-gradient(45deg, transparent 50%, #66758f 50%),
-    linear-gradient(135deg, #66758f 50%, transparent 50%);
+    linear-gradient(135deg, #66758f 50%, transparent 50%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.9));
   background-position:
-    calc(100% - 22px) 50%,
-    calc(100% - 16px) 50%;
+    calc(100% - 25px) 50%,
+    calc(100% - 18px) 50%,
+    0 0;
   background-size:
-    6px 6px,
-    6px 6px;
+    7px 7px,
+    7px 7px,
+    100% 100%;
   background-repeat: no-repeat;
   cursor: pointer;
 }
 
+input[type="date"],
+input[type="number"] {
+  color-scheme: light;
+}
+
+input[type="date"] {
+  padding-right: 10px;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  width: 18px;
+  height: 18px;
+  padding: 5px;
+  border-radius: 999px;
+  background-color: rgba(239, 246, 255, 0.94);
+  cursor: pointer;
+  opacity: 0.78;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  background-color: rgba(219, 234, 254, 0.96);
+  opacity: 1;
+}
+
+input[type="number"] {
+  padding-right: 8px;
+}
+
 select:hover:not(:disabled) {
   border-color: rgba(29, 114, 243, 0.28);
-  background-color: #fff;
+  background-color: rgba(255, 255, 255, 0.98);
 }
 
 select:disabled {
@@ -390,8 +428,296 @@ textarea:focus,
 select:focus {
   outline: none;
   border-color: rgba(29, 114, 243, 0.4);
-  box-shadow: 0 0 0 4px rgba(29, 114, 243, 0.12);
-  background: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.84),
+    0 0 0 4px rgba(29, 114, 243, 0.12);
+  background-color: #fff;
+}
+
+.custom-select,
+.custom-date {
+  position: relative;
+  width: 100%;
+}
+
+.custom-select__button,
+.custom-date__button {
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(122, 139, 163, 0.24);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.9));
+  color: var(--text-1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.custom-select__button:hover:not(:disabled),
+.custom-date__button:hover:not(:disabled) {
+  border-color: rgba(29, 114, 243, 0.28);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(242, 247, 255, 0.94));
+}
+
+.custom-select__button:focus-visible,
+.custom-date__button:focus-visible {
+  outline: none;
+  border-color: rgba(29, 114, 243, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.84),
+    0 0 0 4px rgba(29, 114, 243, 0.12);
+  background-color: #fff;
+}
+
+.custom-select__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.custom-select__label,
+.custom-select__placeholder,
+.custom-date__label,
+.custom-date__placeholder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-select__placeholder,
+.custom-date__placeholder {
+  color: rgba(102, 117, 143, 0.72);
+}
+
+.custom-select__chevron {
+  width: 9px;
+  height: 9px;
+  margin-right: 2px;
+  border-right: 2px solid rgba(102, 117, 143, 0.88);
+  border-bottom: 2px solid rgba(102, 117, 143, 0.88);
+  transform: translateY(-2px) rotate(45deg);
+  flex: 0 0 auto;
+}
+
+.custom-date__icon {
+  width: 18px;
+  height: 18px;
+  border: 1.8px solid rgba(102, 117, 143, 0.78);
+  border-radius: 6px;
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.custom-date__icon::before,
+.custom-date__icon::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  height: 1.8px;
+  border-radius: 999px;
+  background: rgba(102, 117, 143, 0.78);
+}
+
+.custom-date__icon::before {
+  top: 4px;
+}
+
+.custom-date__icon::after {
+  top: 8px;
+}
+
+.custom-select__menu,
+.custom-date__panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 80;
+  border: 1px solid rgba(122, 139, 163, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow:
+    0 18px 44px rgba(31, 45, 72, 0.15),
+    0 1px 0 rgba(255, 255, 255, 0.86) inset;
+  animation: popup-panel-in 0.16s ease both;
+}
+
+.custom-select__menu {
+  max-height: min(280px, 48vh);
+  padding: 7px;
+  overflow-y: auto;
+}
+
+.custom-select__option {
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.custom-select__option:hover:not(:disabled) {
+  background: rgba(29, 114, 243, 0.08);
+}
+
+.custom-select__option.is-selected {
+  color: #155ed1;
+  background: rgba(29, 114, 243, 0.12);
+  font-weight: 700;
+}
+
+.custom-select__option.is-selected::after {
+  content: "";
+  width: 7px;
+  height: 12px;
+  margin-right: 2px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  flex: 0 0 auto;
+}
+
+.custom-select__option.is-disabled,
+.custom-select__option:disabled {
+  color: rgba(102, 117, 143, 0.52);
+  cursor: not-allowed;
+}
+
+.custom-select__empty {
+  padding: 12px;
+  color: rgba(102, 117, 143, 0.72);
+  font-size: 13px;
+  text-align: center;
+}
+
+.custom-date__panel {
+  width: min(312px, calc(100vw - 32px));
+  right: auto;
+  padding: 12px;
+}
+
+.custom-date__header,
+.custom-date__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.custom-date__header strong {
+  color: var(--text-1);
+  font-size: 14px;
+}
+
+.custom-date__nav,
+.custom-date__text-button {
+  border: 0;
+  background: rgba(239, 246, 255, 0.9);
+  color: #2563eb;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.custom-date__nav {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.custom-date__text-button {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.custom-date__nav:hover,
+.custom-date__text-button:hover {
+  background: rgba(219, 234, 254, 0.98);
+  color: #1d4ed8;
+}
+
+.custom-date__weekdays,
+.custom-date__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+}
+
+.custom-date__weekdays {
+  margin-top: 12px;
+  color: rgba(102, 117, 143, 0.72);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.custom-date__grid {
+  margin-top: 6px;
+}
+
+.custom-date__day {
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.custom-date__day:hover {
+  background: rgba(29, 114, 243, 0.08);
+}
+
+.custom-date__day.is-muted {
+  color: rgba(102, 117, 143, 0.38);
+}
+
+.custom-date__day.is-today {
+  box-shadow: inset 0 0 0 1px rgba(29, 114, 243, 0.28);
+}
+
+.custom-date__day.is-selected {
+  background: #1d72f3;
+  color: #fff;
+  font-weight: 800;
+}
+
+.custom-date__footer {
+  margin-top: 10px;
 }
 
 code {
@@ -422,6 +748,18 @@ code {
   to {
     opacity: 0;
     transform: translateY(-8px) scale(0.98);
+  }
+}
+
+@keyframes popup-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 

@@ -21,6 +21,7 @@ import {
   ChatMessageBubble,
   type EditingReplyDraft,
 } from "./components/ChatMessageBubble";
+import { CustomSelect } from "./components/CustomSelect";
 import {
   type AppConfig,
   type Conversation,
@@ -867,39 +868,35 @@ function App() {
             <label className="model-select-label" htmlFor="chat-provider-select">
               模型列表
             </label>
-            <select
+            <CustomSelect
               id="chat-provider-select"
               className="model-select"
               value={model}
-              onChange={(event) => {
-                setModel(event.target.value as ModelType);
+              options={modelOptions.map((option) => ({
+                value: option.id,
+                label: `${option.label} - ${option.provider}`,
+              }))}
+              onChange={(value) => {
+                setModel(value as ModelType);
                 setMobileSidebarOpen(false);
               }}
-            >
-              {modelOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label} - {option.provider}
-                </option>
-              ))}
-            </select>
+            />
 
             <label className="model-select-label" htmlFor="chat-provider-model-select">
               供应商模型
             </label>
-            <select
+            <CustomSelect
               id="chat-provider-model-select"
               className="model-select"
               value={currentProviderConfig.model}
               disabled={providerModelChoices.length === 0}
-              onChange={(event) => void switchProviderModel(event.target.value)}
-            >
-              <option value="">请选择模型</option>
-              {providerModelChoices.map((modelName) => (
-                <option key={modelName} value={modelName}>
-                  {modelName}
-                </option>
-              ))}
-            </select>
+              placeholder={providerModelChoices.length === 0 ? "未添加模型" : "请选择模型"}
+              options={providerModelChoices.map((modelName) => ({
+                value: modelName,
+                label: modelName,
+              }))}
+              onChange={(value) => void switchProviderModel(value)}
+            />
 
           </section>
 
