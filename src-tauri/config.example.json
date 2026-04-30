@@ -63,6 +63,21 @@
   "usage": {
     "detail_retention_days": 0
   },
+  "agent": {
+    "enabled": false,
+    "browser_enabled": false,
+    "system_enabled": false,
+    "shell_enabled": false,
+    "require_confirmation": true,
+    "max_steps": 8,
+    "enabled_skills": [
+      "browser.open",
+      "browser.extract_text",
+      "system.open_path",
+      "system.copy_text",
+      "system.shell"
+    ]
+  },
   "custom_models": {},
   "custom_providers": []
 }

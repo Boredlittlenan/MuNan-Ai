@@ -361,6 +361,104 @@
   gap: 8px;
 }
 
+.agent-setting-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-setting-title > svg {
+  flex: 0 0 auto;
+  color: #42648f;
+}
+
+.agent-skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-skill-card {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid rgba(122, 139, 163, 0.16);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.68);
+  cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.agent-skill-card:hover {
+  background: rgba(255, 255, 255, 0.94);
+  border-color: rgba(29, 114, 243, 0.16);
+}
+
+.agent-skill-card.is-enabled {
+  background: rgba(239, 246, 255, 0.9);
+  border-color: rgba(29, 114, 243, 0.24);
+}
+
+.agent-skill-card.is-category-disabled {
+  opacity: 0.72;
+}
+
+.agent-skill-card input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: #1d72f3;
+}
+
+.agent-skill-card__body,
+.agent-skill-card__header {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-skill-card__header span {
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.agent-skill-card__header code {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #42648f;
+  font-size: 11px;
+}
+
+.agent-preview-card {
+  display: grid;
+  gap: 6px;
+  padding: 11px 12px;
+  border: 1px solid rgba(29, 114, 243, 0.18);
+  border-radius: var(--radius-md);
+  background: rgba(239, 246, 255, 0.9);
+}
+
+.agent-preview-card strong {
+  color: var(--text-1);
+  font-size: 13px;
+}
+
+.agent-preview-card span {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .usage-filter-grid > div:nth-child(2) .custom-date__panel {
   left: auto;
   right: 0;
@@ -575,6 +673,10 @@ select.settings-input {
   line-height: 1.5;
 }
 
+.settings-help-text--danger {
+  color: var(--danger);
+}
+
 .settings-checklist {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -786,6 +888,10 @@ select.settings-input {
   }
 
   .webdav-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-skill-grid {
     grid-template-columns: 1fr;
   }
 

@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   IoArrowBack,
   IoAnalyticsOutline,
+  IoBrowsersOutline,
   IoCheckmarkCircle,
   IoCloudUploadOutline,
   IoCubeOutline,
@@ -16,6 +17,9 @@ import {
   IoPersonOutline,
   IoRefresh,
   IoSave,
+  IoShieldCheckmarkOutline,
+  IoSparklesOutline,
+  IoTerminalOutline,
 } from "react-icons/io5";
 
 import "./styles/base.css";
@@ -31,8 +35,10 @@ import {
   revealConfigBackup,
 } from "./settings/configBackup";
 import {
+  AGENT_SKILLS,
   type AppConfig,
   type AsrProvider,
+  type AgentConfig,
   type ModelType,
   createEmptyAppConfig,
   getModelChoices,
@@ -40,6 +46,7 @@ import {
   getModelMeta,
   getModelOptions,
   isBuiltInModel,
+  normalizeAgentMaxSteps,
   loadPreferredModel,
   normalizeRetentionDays,
   normalizeAppConfig,
@@ -56,7 +63,7 @@ const TENCENT_ASR_ENGINE_OPTIONS = [
   { value: "8k_en", label: "8k_en（电话英语）" },
 ];
 
-type SettingsSection = "user" | "model" | "speech" | "usage";
+type SettingsSection = "user" | "model" | "speech" | "usage" | "agent";
 
 type TokenUsageTotal = {
   prompt_tokens: number;
@@ -84,6 +91,18 @@ type TokenUsageStats = {
   detail_count: number;
 };
 
+type AgentCapabilityPreview = {
+  enabled: boolean;
+  browser_enabled: boolean;
+  system_enabled: boolean;
+  shell_enabled: boolean;
+  require_confirmation: boolean;
+  max_steps: number;
+  enabled_skills: string[];
+  active_skills: string[];
+  message: string;
+};
+
 const SETTINGS_SECTIONS: Array<{
   id: SettingsSection;
   title: string;
@@ -94,6 +113,7 @@ const SETTINGS_SECTIONS: Array<{
   { id: "model", title: "模型配置", meta: "供应商、密钥与模型名称", icon: IoCubeOutline },
   { id: "speech", title: "ASR / TTS 配置", meta: "语音识别与语音合成", icon: IoMicOutline },
   { id: "usage", title: "用量统计", meta: "Token 消耗、趋势图与模型占比", icon: IoAnalyticsOutline },
+  { id: "agent", title: "Agent 设置", meta: "系统操作、浏览器操作与技能开关", icon: IoSparklesOutline },
 ];
 
 /* =========================
@@ -143,6 +163,8 @@ function Settings() {
   const [tokenUsageError, setTokenUsageError] = useState("");
   const [usageStartDate, setUsageStartDate] = useState("");
   const [usageEndDate, setUsageEndDate] = useState("");
+  const [agentPreview, setAgentPreview] = useState<AgentCapabilityPreview | null>(null);
+  const [agentPreviewError, setAgentPreviewError] = useState("");
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   /**
@@ -321,6 +343,59 @@ function Settings() {
         detail_retention_days: days,
       },
     }));
+  };
+
+  const updateAgentField = <K extends keyof AgentConfig>(
+    field: K,
+    value: AgentConfig[K]
+  ) => {
+    setAgentPreview(null);
+    setAgentPreviewError("");
+    setConfig((previous) => ({
+      ...previous,
+      agent: {
+        ...previous.agent,
+        [field]: value,
+        enabled_skills:
+          field === "shell_enabled" && value === true
+            ? Array.from(new Set([...previous.agent.enabled_skills, "system.shell"]))
+            : previous.agent.enabled_skills,
+      },
+    }));
+  };
+
+  const updateAgentMaxSteps = (value: string) => {
+    updateAgentField("max_steps", value === "" ? 1 : normalizeAgentMaxSteps(Number(value)));
+  };
+
+  const toggleAgentSkill = (skillId: string) => {
+    setAgentPreview(null);
+    setAgentPreviewError("");
+    setConfig((previous) => {
+      const enabledSkills = previous.agent.enabled_skills.includes(skillId)
+        ? previous.agent.enabled_skills.filter((item) => item !== skillId)
+        : [...previous.agent.enabled_skills, skillId];
+
+      return {
+        ...previous,
+        agent: {
+          ...previous.agent,
+          enabled_skills: enabledSkills,
+        },
+      };
+    });
+  };
+
+  const previewAgentCapabilities = async () => {
+    try {
+      setAgentPreviewError("");
+      const preview = await invoke<AgentCapabilityPreview>("preview_agent_capabilities", {
+        agent: config.agent,
+      });
+      setAgentPreview(preview);
+    } catch (previewError) {
+      setAgentPreviewError(`Agent 配置检查失败：${String(previewError)}`);
+    }
   };
 
   const isPasswordVisible = (field: string) => visiblePasswordFields.includes(field);
@@ -1090,6 +1165,217 @@ function Settings() {
                       </div>
                     </>
                   )}
+                </div>
+              )}
+
+              {activeSection === "agent" && (
+                <div className="settings-form agent-settings-form">
+                  <div className="settings-field settings-field--wide">
+                    <div className="settings-field__header">
+                      <div>
+                        <p className="section-kicker">Agent</p>
+                        <h3>Agent 总开关</h3>
+                      </div>
+                      <label className="settings-switch">
+                        <input
+                          type="checkbox"
+                          checked={config.agent.enabled}
+                          onChange={(event) => updateAgentField("enabled", event.target.checked)}
+                        />
+                        <span />
+                      </label>
+                    </div>
+                    <p className="settings-help-text">
+                      先作为实验能力管理入口。开启后，后续 Agent 工作台会按这里的权限和技能白名单运行。
+                    </p>
+                  </div>
+
+                  <div className="settings-field">
+                    <div className="settings-field__header">
+                      <div className="agent-setting-title">
+                        <IoBrowsersOutline size={20} />
+                        <div>
+                          <p className="section-kicker">Browser</p>
+                          <h3>浏览器操作</h3>
+                        </div>
+                      </div>
+                      <label className="settings-switch">
+                        <input
+                          type="checkbox"
+                          checked={config.agent.browser_enabled}
+                          onChange={(event) =>
+                            updateAgentField("browser_enabled", event.target.checked)
+                          }
+                        />
+                        <span />
+                      </label>
+                    </div>
+                    <p className="settings-help-text">
+                      允许 Agent 使用独立浏览器执行打开网页、读取文本和截图观察等动作。
+                    </p>
+                  </div>
+
+                  <div className="settings-field">
+                    <div className="settings-field__header">
+                      <div className="agent-setting-title">
+                        <IoTerminalOutline size={20} />
+                        <div>
+                          <p className="section-kicker">System</p>
+                          <h3>系统操作</h3>
+                        </div>
+                      </div>
+                      <label className="settings-switch">
+                        <input
+                          type="checkbox"
+                          checked={config.agent.system_enabled}
+                          onChange={(event) =>
+                            updateAgentField("system_enabled", event.target.checked)
+                          }
+                        />
+                        <span />
+                      </label>
+                    </div>
+                    <p className="settings-help-text">
+                      允许 Agent 使用低风险系统工具，例如打开指定路径或写入剪贴板。
+                    </p>
+                  </div>
+
+                  <div className="settings-field">
+                    <div className="settings-field__header">
+                      <div className="agent-setting-title">
+                        <IoTerminalOutline size={20} />
+                        <div>
+                          <p className="section-kicker">Shell</p>
+                          <h3>Shell 执行</h3>
+                        </div>
+                      </div>
+                      <label className="settings-switch">
+                        <input
+                          type="checkbox"
+                          checked={config.agent.shell_enabled}
+                          onChange={(event) =>
+                            updateAgentField("shell_enabled", event.target.checked)
+                          }
+                        />
+                        <span />
+                      </label>
+                    </div>
+                    <p className="settings-help-text">
+                      允许 AI 根据对话需求自动规划并调用本地 Shell；显式输入“执行命令 ...”仍可作为快捷方式。
+                    </p>
+                  </div>
+
+                  <div className="settings-field">
+                    <div className="settings-field__header">
+                      <div className="agent-setting-title">
+                        <IoShieldCheckmarkOutline size={20} />
+                        <div>
+                          <p className="section-kicker">Safety</p>
+                          <h3>高风险操作确认</h3>
+                        </div>
+                      </div>
+                      <label className="settings-switch">
+                        <input
+                          type="checkbox"
+                          checked={config.agent.require_confirmation}
+                          onChange={(event) =>
+                            updateAgentField("require_confirmation", event.target.checked)
+                          }
+                        />
+                        <span />
+                      </label>
+                    </div>
+                    <p className="settings-help-text">
+                      建议保持开启。发送、提交、删除、上传、输入敏感信息等动作会先暂停等待确认。
+                    </p>
+                  </div>
+
+                  <div className="settings-field">
+                    <div>
+                      <p className="section-kicker">Limits</p>
+                      <h3>单次任务步数</h3>
+                    </div>
+                    <label htmlFor="agent-max-steps">最多执行步数</label>
+                    <input
+                      id="agent-max-steps"
+                      className="settings-input"
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={config.agent.max_steps}
+                      onChange={(event) => updateAgentMaxSteps(event.target.value)}
+                    />
+                    <p className="settings-help-text">
+                      限制 Agent 单次任务的工具调用次数，避免长任务失控。可填 1-30，默认 8。
+                    </p>
+                  </div>
+
+                  <div className="settings-field settings-field--wide">
+                    <div className="settings-field__header">
+                      <div>
+                        <p className="section-kicker">Skills</p>
+                        <h3>技能白名单</h3>
+                      </div>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => void previewAgentCapabilities()}
+                      >
+                        检查配置
+                      </button>
+                    </div>
+
+                    <div className="agent-skill-grid">
+                      {AGENT_SKILLS.map((skill) => {
+                        const enabled = config.agent.enabled_skills.includes(skill.id);
+                        const categoryEnabled =
+                          skill.id === "system.shell"
+                            ? config.agent.shell_enabled
+                            : skill.category === "browser"
+                              ? config.agent.browser_enabled
+                              : config.agent.system_enabled;
+
+                        return (
+                          <label
+                            key={skill.id}
+                            className={`agent-skill-card ${enabled ? "is-enabled" : ""} ${
+                              categoryEnabled ? "" : "is-category-disabled"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={enabled}
+                              onChange={() => toggleAgentSkill(skill.id)}
+                            />
+                            <span className="agent-skill-card__body">
+                              <span className="agent-skill-card__header">
+                                <span>{skill.label}</span>
+                                <code>{skill.id}</code>
+                              </span>
+                              <span className="settings-help-text">{skill.description}</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    {agentPreview && (
+                      <div className="agent-preview-card">
+                        <strong>{agentPreview.message}</strong>
+                        <span>
+                          当前可执行技能：
+                          {agentPreview.active_skills.length > 0
+                            ? agentPreview.active_skills.join("、")
+                            : "暂无"}
+                        </span>
+                      </div>
+                    )}
+                    {agentPreviewError && (
+                      <p className="settings-help-text settings-help-text--danger">
+                        {agentPreviewError}
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
 

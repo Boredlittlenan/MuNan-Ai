@@ -159,6 +159,56 @@ fn default_usage_retention_days() -> i64 {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AgentConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub browser_enabled: bool,
+    #[serde(default)]
+    pub system_enabled: bool,
+    #[serde(default)]
+    pub shell_enabled: bool,
+    #[serde(default = "default_agent_require_confirmation")]
+    pub require_confirmation: bool,
+    #[serde(default = "default_agent_max_steps")]
+    pub max_steps: u32,
+    #[serde(default = "default_agent_enabled_skills")]
+    pub enabled_skills: Vec<String>,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            browser_enabled: false,
+            system_enabled: false,
+            shell_enabled: false,
+            require_confirmation: default_agent_require_confirmation(),
+            max_steps: default_agent_max_steps(),
+            enabled_skills: default_agent_enabled_skills(),
+        }
+    }
+}
+
+fn default_agent_require_confirmation() -> bool {
+    true
+}
+
+fn default_agent_max_steps() -> u32 {
+    8
+}
+
+fn default_agent_enabled_skills() -> Vec<String> {
+    vec![
+        "browser.open".into(),
+        "browser.extract_text".into(),
+        "system.open_path".into(),
+        "system.copy_text".into(),
+        "system.shell".into(),
+    ]
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
@@ -181,6 +231,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub usage: UsageConfig,
     #[serde(default)]
+    pub agent: AgentConfig,
+    #[serde(default)]
     pub custom_models: HashMap<String, Vec<String>>,
     #[serde(default)]
     pub custom_providers: Vec<CustomProviderConfig>,
@@ -199,6 +251,7 @@ impl Default for AppConfig {
             persona: PersonaConfig::default(),
             webdav: WebDavConfig::default(),
             usage: UsageConfig::default(),
+            agent: AgentConfig::default(),
             custom_models: HashMap::new(),
             custom_providers: Vec::new(),
         }

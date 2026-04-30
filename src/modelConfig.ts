@@ -94,12 +94,32 @@ export type UsageConfig = {
   detail_retention_days: number;
 };
 
+export type AgentSkillCategory = "browser" | "system";
+
+export type AgentSkill = {
+  id: string;
+  category: AgentSkillCategory;
+  label: string;
+  description: string;
+};
+
+export type AgentConfig = {
+  enabled: boolean;
+  browser_enabled: boolean;
+  system_enabled: boolean;
+  shell_enabled: boolean;
+  require_confirmation: boolean;
+  max_steps: number;
+  enabled_skills: string[];
+};
+
 export type AppConfig = Record<BuiltInModelType, ModelConfig> & {
   schema_version: number;
   speech: SpeechConfig;
   persona: PersonaConfig;
   webdav: WebDavConfig;
   usage: UsageConfig;
+  agent: AgentConfig;
   custom_models: Record<BuiltInModelType, string[]>;
   custom_providers: CustomProviderConfig[];
 };
@@ -172,6 +192,41 @@ export const MODEL_META: Record<BuiltInModelType, ModelMeta> = {
   },
 };
 
+export const AGENT_SKILLS: AgentSkill[] = [
+  {
+    id: "browser.open",
+    category: "browser",
+    label: "打开网页",
+    description: "在独立 Agent 浏览器中打开指定 URL。",
+  },
+  {
+    id: "browser.extract_text",
+    category: "browser",
+    label: "读取页面文本",
+    description: "提取当前网页可见文本，供模型继续判断下一步。",
+  },
+  {
+    id: "system.open_path",
+    category: "system",
+    label: "打开文件或目录",
+    description: "打开用户指定的本地文件、文件夹或应用路径。",
+  },
+  {
+    id: "system.copy_text",
+    category: "system",
+    label: "复制文本",
+    description: "把 Agent 生成的文本写入剪贴板，便于用户粘贴。",
+  },
+  {
+    id: "system.shell",
+    category: "system",
+    label: "Shell 执行",
+    description: "由 AI 根据用户需求规划并执行本地 Shell 命令，返回退出码与输出。",
+  },
+];
+
+const DEFAULT_AGENT_SKILLS = AGENT_SKILLS.map((skill) => skill.id);
+
 const CONVERSATIONS_STORAGE_KEY = "chatConversations";
 const USER_STATE_STORAGE_KEY = "userState";
 const PREFERRED_MODEL_STORAGE_KEY = "preferredModel";
@@ -221,6 +276,15 @@ export const createEmptyAppConfig = (): AppConfig => ({
   },
   usage: {
     detail_retention_days: 0,
+  },
+  agent: {
+    enabled: false,
+    browser_enabled: false,
+    system_enabled: false,
+    shell_enabled: false,
+    require_confirmation: true,
+    max_steps: 8,
+    enabled_skills: DEFAULT_AGENT_SKILLS,
   },
   custom_models: {
     openai: [],
@@ -326,6 +390,7 @@ export const normalizeAppConfig = (
         persona?: Partial<PersonaConfig>;
         webdav?: Partial<WebDavConfig>;
         usage?: Partial<UsageConfig>;
+        agent?: Partial<AgentConfig>;
         custom_models?: Partial<Record<BuiltInModelType, string[]>>;
         custom_providers?: Partial<CustomProviderConfig>[];
         schema_version?: number;
@@ -381,6 +446,16 @@ export const normalizeAppConfig = (
       value?.usage?.detail_retention_days ?? fallback.usage.detail_retention_days
     ),
   };
+  fallback.agent = {
+    enabled: value?.agent?.enabled ?? fallback.agent.enabled,
+    browser_enabled: value?.agent?.browser_enabled ?? fallback.agent.browser_enabled,
+    system_enabled: value?.agent?.system_enabled ?? fallback.agent.system_enabled,
+    shell_enabled: value?.agent?.shell_enabled ?? fallback.agent.shell_enabled,
+    require_confirmation:
+      value?.agent?.require_confirmation ?? fallback.agent.require_confirmation,
+    max_steps: normalizeAgentMaxSteps(value?.agent?.max_steps ?? fallback.agent.max_steps),
+    enabled_skills: normalizeAgentSkills(value?.agent?.enabled_skills),
+  };
 
   for (const option of MODEL_OPTIONS) {
     fallback.custom_models[option.id] = Array.isArray(value?.custom_models?.[option.id])
@@ -407,6 +482,27 @@ export const normalizeAppConfig = (
     : [];
 
   return fallback;
+};
+
+export const normalizeAgentSkills = (value: string[] | undefined): string[] => {
+  if (!Array.isArray(value)) {
+    return DEFAULT_AGENT_SKILLS;
+  }
+
+  const allowed = new Set(AGENT_SKILLS.map((skill) => skill.id));
+  const normalized = Array.from(new Set(value.filter((item) => allowed.has(item))));
+
+  return normalized.length > 0 ? normalized : DEFAULT_AGENT_SKILLS;
+};
+
+export const normalizeAgentMaxSteps = (value: number): number => {
+  const steps = Math.round(Number(value));
+
+  if (!Number.isFinite(steps)) {
+    return 8;
+  }
+
+  return Math.min(Math.max(steps, 1), 30);
 };
 
 export const normalizeRetentionDays = (value: number): number => {

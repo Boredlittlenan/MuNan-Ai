@@ -9,6 +9,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            commands::agent::agent_fetch_url_text,
+            commands::agent::agent_plan_shell_action,
+            commands::agent::agent_run_shell,
+            commands::agent::preview_agent_capabilities,
             commands::chat::chat_with_ai,
             commands::config::export_app_config,
             commands::config::export_app_config_to_webdav,

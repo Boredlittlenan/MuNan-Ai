@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { Link } from "react-router-dom";
 import {
   IoChatbubbleEllipses,
@@ -58,6 +59,27 @@ type ChatReplyResponse = {
   content: string;
   tts_text: string;
   original_content: string;
+};
+
+type AgentFetchedPage = {
+  url: string;
+  title: string;
+  text: string;
+};
+
+type AgentShellResult = {
+  command: string;
+  cwd: string;
+  exit_code: number | null;
+  stdout: string;
+  stderr: string;
+  timed_out: boolean;
+};
+
+type AgentShellPlan = {
+  should_run: boolean;
+  command: string;
+  reason: string;
 };
 
 const MAX_IMAGE_ATTACHMENTS = 4;
@@ -335,6 +357,7 @@ function App() {
    * 只要 base_url、api_key 和 model 名称任意一个为空，就视为未完成配置。
    */
   const currentModelReady = isModelConfigured(appConfig, model);
+  const agentQuickActionsReady = appConfig.agent.enabled;
 
   const switchProviderModel = async (modelName: string) => {
     const nextConfig = updateModelConfig(appConfig, model, { model: modelName });
@@ -463,6 +486,188 @@ function App() {
     }));
   };
 
+  const runAgentQuickAction = async (text: string): Promise<Message | null> => {
+    const action = parseAgentQuickAction(text);
+
+    if (!action) {
+      return null;
+    }
+
+    if (action.kind === "unsupported") {
+      return {
+        role: "ai",
+        content: "这个操作我现在还没接上真实工具。当前可直接执行的是：打开网页 URL / 读取网页文本 / 打开本地路径 / 复制文本 / 执行明确输入的 Shell 命令。下一步接入独立浏览器后，才能做截图观察、点击和填写表单。",
+      };
+    }
+
+    if (!appConfig.agent.enabled) {
+      return {
+        role: "ai",
+        content: "Agent 还没有开启。请到设置页的“Agent 设置”里打开总开关，并开启对应的浏览器或系统操作能力。",
+      };
+    }
+
+    if (
+      action.category === "browser" &&
+      (!appConfig.agent.browser_enabled || !appConfig.agent.enabled_skills.includes(action.skill))
+    ) {
+      return {
+        role: "ai",
+        content: `浏览器技能 ${action.skill} 还没有启用。请到设置页的“Agent 设置”里开启浏览器操作和对应技能。`,
+      };
+    }
+
+    const systemCapabilityEnabled =
+      action.kind === "shell" ? appConfig.agent.shell_enabled : appConfig.agent.system_enabled;
+
+    if (
+      action.category === "system" &&
+      (!systemCapabilityEnabled || !appConfig.agent.enabled_skills.includes(action.skill))
+    ) {
+      return {
+        role: "ai",
+        content:
+          action.kind === "shell"
+            ? `Shell 技能 ${action.skill} 还没有启用。请到设置页的“Agent 设置”里开启 Shell 执行和对应技能。`
+            : `系统技能 ${action.skill} 还没有启用。请到设置页的“Agent 设置”里开启系统操作和对应技能。`,
+      };
+    }
+
+    if (appConfig.agent.require_confirmation) {
+      const accepted = window.confirm(`Agent 准备执行：${action.confirmText}\n\n是否继续？`);
+
+      if (!accepted) {
+        return {
+          role: "ai",
+          content: `已取消：${action.confirmText}`,
+        };
+      }
+    }
+
+    try {
+      if (action.kind === "open_url") {
+        await openUrl(action.url);
+        return {
+          role: "ai",
+          content: `已打开网页：${action.url}\n\n当前版本先调用系统默认浏览器打开网页；后续会升级为独立 Agent 浏览器，并支持读取页面、截图观察和点击操作。`,
+        };
+      }
+
+      if (action.kind === "fetch_url_text") {
+        const page = await invoke<AgentFetchedPage>("agent_fetch_url_text", {
+          url: action.url,
+        });
+        const title = page.title || "未提取到标题";
+        return {
+          role: "ai",
+          content: `已读取网页文本：${title}\n${page.url}\n\n${page.text}`,
+        };
+      }
+
+      if (action.kind === "open_path") {
+        await openPath(action.path);
+        return {
+          role: "ai",
+          content: `已打开路径：${action.path}`,
+        };
+      }
+
+      if (action.kind === "shell") {
+        const result = await invoke<AgentShellResult>("agent_run_shell", {
+          request: {
+            command: action.command,
+            cwd: action.cwd,
+          },
+        });
+        return {
+          role: "ai",
+          content: formatShellResult(result),
+        };
+      }
+
+      await navigator.clipboard.writeText(action.text);
+      return {
+        role: "ai",
+        content: "已复制到剪贴板。",
+      };
+    } catch (agentError) {
+      return {
+        role: "ai",
+        content: `Agent 操作失败：${String(agentError)}`,
+      };
+    }
+  };
+
+  const runAgentAutoShellAction = async (
+    text: string,
+    optimisticMessages: Message[],
+    conversationId: string
+  ): Promise<Message | null> => {
+    if (
+      !currentModelReady ||
+      !appConfig.agent.enabled ||
+      !appConfig.agent.shell_enabled ||
+      !appConfig.agent.enabled_skills.includes("system.shell")
+    ) {
+      return null;
+    }
+
+    let plan: AgentShellPlan;
+    try {
+      plan = await invoke<AgentShellPlan>("agent_plan_shell_action", {
+        request: {
+          model,
+          userText: text,
+          messages: optimisticMessages.map(toApiMessage),
+        },
+      });
+    } catch (planError) {
+      console.warn("Agent Shell 规划失败，回退到普通聊天。", planError);
+      return null;
+    }
+
+    if (!plan.should_run || !plan.command.trim()) {
+      return null;
+    }
+
+    let result: AgentShellResult;
+    try {
+      result = await invoke<AgentShellResult>("agent_run_shell", {
+        request: {
+          command: plan.command,
+          cwd: "",
+        },
+      });
+    } catch (shellError) {
+      return {
+        role: "ai",
+        content: `Agent 判断需要执行 Shell，但命令运行失败。\n\n计划命令：\`${plan.command}\`\n原因：${plan.reason || "未提供"}\n错误：${String(shellError)}`,
+      };
+    }
+    const toolContext = buildShellToolContext(plan, result);
+    const reply = await invoke<ChatReplyResponse>("chat_with_ai", {
+      model,
+      messages: [
+        ...optimisticMessages.map(toApiMessage),
+        {
+          role: "user",
+          content: toolContext,
+        },
+      ],
+      conversationId,
+    });
+    const replyImages = extractImageAttachments(reply.content);
+    const replyContent = stripImageMarkdown(reply.content);
+
+    return {
+      role: "ai",
+      content: replyContent || reply.content,
+      tts_text: reply.tts_text,
+      original_content: reply.original_content || reply.content,
+      attachments: replyImages,
+    };
+  };
+
   /**
    * 输入发送的核心逻辑：
    * 1. 先把用户消息写进本地 UI，保证页面即时反馈。
@@ -473,7 +678,6 @@ function App() {
     if (
       (!input.trim() && pendingAttachments.length === 0) ||
       loading ||
-      !currentModelReady ||
       !conversationsReady
     ) {
       return;
@@ -525,6 +729,68 @@ function App() {
     setLoading(true);
 
     try {
+      const agentReply = await runAgentQuickAction(input.trim());
+
+      if (agentReply) {
+        setConversations((previous) => ({
+          ...previous,
+          [model]: (previous[model] ?? []).map((conversation) =>
+            conversation.id === activeConversation.id
+              ? {
+                  ...conversation,
+                  updated_at: Date.now(),
+                  messages: [...optimisticMessages, agentReply],
+                }
+              : conversation
+          ),
+        }));
+        return;
+      }
+
+      const autoAgentReply = await runAgentAutoShellAction(
+        input.trim(),
+        optimisticMessages,
+        activeConversation.id
+      );
+
+      if (autoAgentReply) {
+        setConversations((previous) => ({
+          ...previous,
+          [model]: (previous[model] ?? []).map((conversation) =>
+            conversation.id === activeConversation.id
+              ? {
+                  ...conversation,
+                  updated_at: Date.now(),
+                  messages: [...optimisticMessages, autoAgentReply],
+                }
+              : conversation
+          ),
+        }));
+        return;
+      }
+
+      if (!currentModelReady) {
+        setConversations((previous) => ({
+          ...previous,
+          [model]: (previous[model] ?? []).map((conversation) =>
+            conversation.id === activeConversation.id
+              ? {
+                  ...conversation,
+                  updated_at: Date.now(),
+                  messages: [
+                    ...optimisticMessages,
+                    {
+                      role: "ai",
+                      content: "当前模型还没有配置完整。要聊天请先到设置页填写模型配置；要使用 Agent 操作，请先在设置页开启 Agent。",
+                    },
+                  ],
+                }
+              : conversation
+          ),
+        }));
+        return;
+      }
+
       const apiMessages = optimisticMessages.map(toApiMessage);
 
       const reply = await invoke<ChatReplyResponse>("chat_with_ai", {
@@ -1091,7 +1357,7 @@ function App() {
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 placeholder="输入问题、代码需求或灵感草稿..."
-                disabled={loading || !currentModelReady || !conversationsReady}
+                disabled={loading || (!currentModelReady && !agentQuickActionsReady) || !conversationsReady}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
@@ -1167,7 +1433,7 @@ function App() {
                 disabled={
                   loading ||
                   (!input.trim() && pendingAttachments.length === 0) ||
-                  !currentModelReady ||
+                  (!currentModelReady && !agentQuickActionsReady) ||
                   !conversationsReady ||
                   recordingState !== "idle"
                 }
@@ -1263,3 +1529,231 @@ const stripImageMarkdown = (content: string): string => {
 
 const markdownImagePattern = () =>
   /!\[([^\]]*)\]\((data:image\/[^)]+|https?:\/\/[^)\s]+)\)/g;
+
+type AgentQuickAction =
+  | {
+      kind: "open_url";
+      category: "browser";
+      skill: "browser.open";
+      url: string;
+      confirmText: string;
+    }
+  | {
+      kind: "fetch_url_text";
+      category: "browser";
+      skill: "browser.extract_text";
+      url: string;
+      confirmText: string;
+    }
+  | {
+      kind: "open_path";
+      category: "system";
+      skill: "system.open_path";
+      path: string;
+      confirmText: string;
+    }
+  | {
+      kind: "copy_text";
+      category: "system";
+      skill: "system.copy_text";
+      text: string;
+      confirmText: string;
+    }
+  | {
+      kind: "shell";
+      category: "system";
+      skill: "system.shell";
+      command: string;
+      cwd: string;
+      confirmText: string;
+    }
+  | {
+      kind: "unsupported";
+      category: "browser";
+      skill: "browser.open";
+      confirmText: string;
+    };
+
+const parseAgentQuickAction = (text: string): AgentQuickAction | null => {
+  const trimmed = text.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const shellCommand = extractShellCommand(trimmed);
+  if (shellCommand) {
+    return {
+      kind: "shell",
+      category: "system",
+      skill: "system.shell",
+      command: shellCommand,
+      cwd: "",
+      confirmText: `执行 Shell 命令：${shellCommand}`,
+    };
+  }
+
+  const copyText = extractCopyText(trimmed);
+  if (copyText) {
+    return {
+      kind: "copy_text",
+      category: "system",
+      skill: "system.copy_text",
+      text: copyText,
+      confirmText: "复制文本到剪贴板",
+    };
+  }
+
+  const pageTextUrl = extractPageTextUrl(trimmed);
+  if (pageTextUrl) {
+    return {
+      kind: "fetch_url_text",
+      category: "browser",
+      skill: "browser.extract_text",
+      url: pageTextUrl,
+      confirmText: `读取网页文本 ${pageTextUrl}`,
+    };
+  }
+
+  const path = extractPathToOpen(trimmed);
+  if (path) {
+    return {
+      kind: "open_path",
+      category: "system",
+      skill: "system.open_path",
+      path,
+      confirmText: `打开路径 ${path}`,
+    };
+  }
+
+  const url = extractUrlToOpen(trimmed);
+  if (url) {
+    return {
+      kind: "open_url",
+      category: "browser",
+      skill: "browser.open",
+      url,
+      confirmText: `打开网页 ${url}`,
+    };
+  }
+
+  if (/截图|读取.*页面|提取.*页面|点击|填写|提交|浏览器|操作/.test(trimmed)) {
+    return {
+      kind: "unsupported",
+      category: "browser",
+      skill: "browser.open",
+      confirmText: "暂未支持的 Agent 操作",
+    };
+  }
+
+  return null;
+};
+
+const extractPageTextUrl = (text: string): string | null => {
+  if (!/(读取|提取|总结|分析|查看).*(网页|页面|网站|URL|链接|内容)/i.test(text)) {
+    return null;
+  }
+
+  return extractUrlFromText(text);
+};
+
+const extractUrlToOpen = (text: string): string | null => {
+  if (!/(打开|访问|浏览|网页|网站|搜索)/.test(text)) {
+    return null;
+  }
+
+  const explicitUrl = extractUrlFromText(text);
+  if (explicitUrl) {
+    return explicitUrl;
+  }
+
+  const commonSites: Array<[RegExp, string]> = [
+    [/百度|baidu/i, "https://www.baidu.com"],
+    [/哔哩哔哩|bilibili|b站/i, "https://www.bilibili.com"],
+    [/github/i, "https://github.com"],
+    [/google|谷歌/i, "https://www.google.com"],
+    [/知乎|zhihu/i, "https://www.zhihu.com"],
+  ];
+  const matchedSite = commonSites.find(([pattern]) => pattern.test(text));
+
+  return matchedSite?.[1] ?? null;
+};
+
+const extractUrlFromText = (text: string): string | null => {
+  const urlMatch = text.match(/https?:\/\/[^\s，。；、)）]+/i);
+  if (urlMatch) {
+    return urlMatch[0];
+  }
+
+  const wwwMatch = text.match(/www\.[^\s，。；、)）]+/i);
+  if (wwwMatch) {
+    return `https://${wwwMatch[0]}`;
+  }
+
+  return null;
+};
+
+const extractPathToOpen = (text: string): string | null => {
+  if (!/(打开|访问|定位|查看).*(文件|文件夹|目录|路径|盘|[A-Za-z]:\\|[A-Za-z]:\/)/.test(text)) {
+    return null;
+  }
+
+  const windowsPath = text.match(/[A-Za-z]:[\\/][^\n\r]+/);
+  if (windowsPath) {
+    return windowsPath[0].trim().replace(/[，。；]+$/, "");
+  }
+
+  const quotedPath = text.match(/[“"']([^“"']+[\\/][^“"']+)[”"']/);
+  return quotedPath?.[1]?.trim() ?? null;
+};
+
+const extractCopyText = (text: string): string | null => {
+  const match = text.match(/^(?:帮我)?复制(?:一下|到剪贴板)?[：:\s]+([\s\S]+)$/);
+  const value = match?.[1]?.trim();
+
+  return value || null;
+};
+
+const extractShellCommand = (text: string): string | null => {
+  const patterns = [
+    /^(?:帮我)?(?:执行|运行)\s*(?:一下)?\s*(?:shell|命令|终端|powershell)\s*[：:\s]+([\s\S]+)$/i,
+    /^(?:shell|powershell|pwsh|终端)\s*[：:\s]+([\s\S]+)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const command = match?.[1]?.trim();
+
+    if (command) {
+      return command;
+    }
+  }
+
+  return null;
+};
+
+const formatShellResult = (result: AgentShellResult): string => {
+  const exitStatus = result.timed_out ? "已超时" : `退出码 ${result.exit_code ?? "未知"}`;
+  const stdout = escapeMarkdownFence(result.stdout.trim() || "(无)");
+  const stderr = result.stderr.trim();
+  const stderrBlock = stderr
+    ? `\n\nstderr:\n\`\`\`\n${escapeMarkdownFence(stderr)}\n\`\`\``
+    : "";
+
+  return `Shell 执行完成：${exitStatus}\n\n命令：\`${result.command}\`\n目录：\`${result.cwd || "."}\`\n\nstdout:\n\`\`\`\n${stdout}\n\`\`\`${stderrBlock}`;
+};
+
+const buildShellToolContext = (plan: AgentShellPlan, result: AgentShellResult): string => {
+  const exitStatus = result.timed_out ? "已超时" : `退出码 ${result.exit_code ?? "未知"}`;
+  const stdout = escapeMarkdownFence(result.stdout.trim() || "(无)");
+  const stderr = result.stderr.trim();
+  const stderrBlock = stderr
+    ? `\n\nstderr:\n\`\`\`\n${escapeMarkdownFence(stderr)}\n\`\`\``
+    : "";
+
+  return `你刚刚根据用户需求自动调用了本地 Shell。请基于下面的执行结果，直接回答用户刚才的问题，不要编造没有出现在输出里的事实。\n\n规划理由：${plan.reason || "未提供"}\n命令：\`${result.command}\`\n工作目录：\`${result.cwd || "."}\`\n状态：${exitStatus}\n\nstdout:\n\`\`\`\n${stdout}\n\`\`\`${stderrBlock}`;
+};
+
+const escapeMarkdownFence = (text: string): string => {
+  return text.replace(/```/g, "`\u200b``");
+};
