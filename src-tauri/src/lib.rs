@@ -16,6 +16,7 @@ pub fn run() {
             commands::config::load_app_config,
             commands::config::save_app_config,
             storage::load_conversations,
+            storage::load_token_usage_stats,
             storage::save_conversations,
             speech::asr::transcribe_audio,
             speech::tts::synthesize_speech,

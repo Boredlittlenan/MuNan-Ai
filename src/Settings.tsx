@@ -34,6 +34,7 @@ import {
   getModelOptions,
   isBuiltInModel,
   loadPreferredModel,
+  normalizeRetentionDays,
   normalizeAppConfig,
   savePreferredModel,
   updateModelConfig,
@@ -48,7 +49,33 @@ const TENCENT_ASR_ENGINE_OPTIONS = [
   { value: "8k_en", label: "8k_en（电话英语）" },
 ];
 
-type SettingsSection = "user" | "model" | "speech";
+type SettingsSection = "user" | "model" | "speech" | "usage";
+
+type TokenUsageTotal = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  request_count: number;
+  precise_count: number;
+};
+
+type TokenUsageModelStats = TokenUsageTotal & {
+  provider: string;
+  model: string;
+};
+
+type TokenUsageDailyPoint = TokenUsageTotal & {
+  usage_date: string;
+};
+
+type TokenUsageStats = {
+  today: TokenUsageTotal;
+  month: TokenUsageTotal;
+  range: TokenUsageTotal;
+  daily: TokenUsageDailyPoint[];
+  by_model: TokenUsageModelStats[];
+  detail_count: number;
+};
 
 const SETTINGS_SECTIONS: Array<{
   id: SettingsSection;
@@ -58,6 +85,7 @@ const SETTINGS_SECTIONS: Array<{
   { id: "user", title: "基础配置", meta: "用户、默认模型与备份同步" },
   { id: "model", title: "模型配置", meta: "供应商、密钥与模型名称" },
   { id: "speech", title: "ASR / TTS 配置", meta: "语音识别与语音合成" },
+  { id: "usage", title: "用量统计", meta: "Token 消耗、趋势图与模型占比" },
 ];
 
 /* =========================
@@ -103,6 +131,10 @@ function Settings() {
   const [visiblePasswordFields, setVisiblePasswordFields] = useState<string[]>([]);
   const [customModelName, setCustomModelName] = useState("");
   const [customProviderName, setCustomProviderName] = useState("");
+  const [tokenUsageStats, setTokenUsageStats] = useState<TokenUsageStats | null>(null);
+  const [tokenUsageError, setTokenUsageError] = useState("");
+  const [usageStartDate, setUsageStartDate] = useState("");
+  const [usageEndDate, setUsageEndDate] = useState("");
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   /**
@@ -116,6 +148,14 @@ function Settings() {
   const selectedModelChoices = useMemo(() => {
     return getModelChoices(config, selectedModel);
   }, [config, selectedModel]);
+  const usageDailyPoints = useMemo(
+    () => tokenUsageStats?.daily ?? [],
+    [tokenUsageStats]
+  );
+  const usageChartPoints = useMemo(
+    () => usageDailyPoints.slice(-24),
+    [usageDailyPoints]
+  );
 
   /**
    * 页面加载时从后端读取最新配置。
@@ -129,6 +169,7 @@ function Settings() {
       try {
         const nextConfig = await invoke<AppConfig>("load_app_config");
         setConfig(normalizeAppConfig(nextConfig));
+        await loadTokenUsageStats();
       } catch (loadError) {
         setError(`配置读取失败：${String(loadError)}`);
       } finally {
@@ -138,6 +179,23 @@ function Settings() {
 
     void loadConfig();
   }, []);
+
+  const loadTokenUsageStats = async (
+    startDate = usageStartDate,
+    endDate = usageEndDate
+  ) => {
+    try {
+      setTokenUsageError("");
+      setTokenUsageStats(
+        await invoke<TokenUsageStats>("load_token_usage_stats", {
+          startDate: startDate || null,
+          endDate: endDate || null,
+        })
+      );
+    } catch (usageError) {
+      setTokenUsageError(`用量统计读取失败：${String(usageError)}`);
+    }
+  };
 
   useEffect(() => {
     if (!error && !message) {
@@ -241,6 +299,18 @@ function Settings() {
       webdav: {
         ...previous.webdav,
         [field]: value,
+      },
+    }));
+  };
+
+  const updateUsageRetentionDays = (value: string) => {
+    const days = value === "" ? 0 : normalizeRetentionDays(Number(value));
+
+    setConfig((previous) => ({
+      ...previous,
+      usage: {
+        ...previous.usage,
+        detail_retention_days: days,
       },
     }));
   };
@@ -802,6 +872,199 @@ function Settings() {
                       这段内容会作为 system message 注入每次聊天请求。语气、身份、回答边界都可以在这里手动调整。
                     </p>
                   </div>
+                </div>
+              )}
+
+              {activeSection === "usage" && (
+                <div className="settings-form usage-settings-form">
+                  <div className="settings-field settings-field--wide">
+                    <div className="settings-field__header">
+                      <div>
+                        <p className="section-kicker">Usage</p>
+                        <h3>Token 用量统计</h3>
+                      </div>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => void loadTokenUsageStats()}
+                      >
+                        刷新统计
+                      </button>
+                    </div>
+
+                    <div className="usage-filter-grid">
+                      <div>
+                        <label htmlFor="usage-start-date">开始日期</label>
+                        <input
+                          id="usage-start-date"
+                          className="settings-input"
+                          type="date"
+                          value={usageStartDate}
+                          onChange={(event) => setUsageStartDate(event.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="usage-end-date">结束日期</label>
+                        <input
+                          id="usage-end-date"
+                          className="settings-input"
+                          type="date"
+                          value={usageEndDate}
+                          onChange={(event) => setUsageEndDate(event.target.value)}
+                        />
+                      </div>
+                      <div className="usage-filter-actions">
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={() => void loadTokenUsageStats()}
+                        >
+                          应用筛选
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={() => {
+                            setUsageStartDate("");
+                            setUsageEndDate("");
+                            void loadTokenUsageStats("", "");
+                          }}
+                        >
+                          清空日期
+                        </button>
+                      </div>
+                    </div>
+
+                    <label htmlFor="usage-retention-days">明细保存时间</label>
+                    <input
+                      id="usage-retention-days"
+                      className="settings-input"
+                      type="number"
+                      min={0}
+                      max={3650}
+                      step={1}
+                      value={config.usage.detail_retention_days}
+                      onChange={(event) => updateUsageRetentionDays(event.target.value)}
+                    />
+                    <p className="settings-help-text">
+                      0 表示永久保存明细；填写 7-3650 会在后续成功请求时自动清理更早明细。日汇总始终长期保留。
+                    </p>
+                  </div>
+
+                  {tokenUsageError ? (
+                    <div className="settings-field settings-field--wide">
+                      <p className="settings-help-text">{tokenUsageError}</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="usage-stats-panel settings-field--wide">
+                        <div className="usage-stat-card">
+                          <span>筛选范围</span>
+                          <strong>{formatTokenCount(tokenUsageStats?.range.total_tokens ?? 0)}</strong>
+                          <small>
+                            {tokenUsageStats?.range.request_count ?? 0} 次请求 · 精确{" "}
+                            {tokenUsageStats?.range.precise_count ?? 0} 次
+                          </small>
+                        </div>
+                        <div className="usage-stat-card">
+                          <span>今日</span>
+                          <strong>{formatTokenCount(tokenUsageStats?.today.total_tokens ?? 0)}</strong>
+                          <small>{tokenUsageStats?.today.request_count ?? 0} 次请求</small>
+                        </div>
+                        <div className="usage-stat-card">
+                          <span>本月</span>
+                          <strong>{formatTokenCount(tokenUsageStats?.month.total_tokens ?? 0)}</strong>
+                          <small>{tokenUsageStats?.month.request_count ?? 0} 次请求</small>
+                        </div>
+                        <div className="usage-stat-card">
+                          <span>明细记录</span>
+                          <strong>{formatTokenCount(tokenUsageStats?.detail_count ?? 0)}</strong>
+                          <small>
+                            {config.usage.detail_retention_days === 0
+                              ? "永久保存"
+                              : `保留 ${config.usage.detail_retention_days} 天`}
+                          </small>
+                        </div>
+                      </div>
+
+                      <div className="settings-field usage-chart-card">
+                        <div>
+                          <p className="section-kicker">Line</p>
+                          <h3>Token 趋势</h3>
+                        </div>
+                        <svg className="usage-line-chart" viewBox="0 0 320 120" role="img">
+                          <polyline points={buildLineChartPoints(usageChartPoints)} />
+                        </svg>
+                        <p className="settings-help-text">
+                          显示筛选范围内最近 {usageChartPoints.length || 0} 天的总 token 走势。
+                        </p>
+                      </div>
+
+                      <div className="settings-field usage-chart-card">
+                        <div>
+                          <p className="section-kicker">Bar</p>
+                          <h3>每日消耗</h3>
+                        </div>
+                        <div className="usage-bar-chart">
+                          {usageChartPoints.length ? (
+                            usageChartPoints.map((point) => (
+                              <div className="usage-bar-column" key={point.usage_date}>
+                                <span
+                                  style={{
+                                    height: `${buildBarHeight(point, usageChartPoints)}%`,
+                                  }}
+                                />
+                                <small>{point.usage_date.slice(5)}</small>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="settings-help-text">暂无可展示的数据。</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="settings-field settings-field--wide usage-pie-card">
+                        <div>
+                          <p className="section-kicker">Share</p>
+                          <h3>各模型消耗占比</h3>
+                        </div>
+                        {tokenUsageStats?.by_model.length ? (
+                          <div className="usage-pie-layout">
+                            <div
+                              className="usage-pie-chart"
+                              style={{
+                                background: buildPieGradient(tokenUsageStats.by_model),
+                              }}
+                              aria-label="各模型 token 消耗占比"
+                            />
+                            <div className="usage-model-list">
+                              {tokenUsageStats.by_model.map((item, index) => (
+                                <div
+                                  className="usage-model-row"
+                                  key={`${item.provider}-${item.model}`}
+                                >
+                                  <div>
+                                    <strong>
+                                      <i style={{ background: USAGE_CHART_COLORS[index % USAGE_CHART_COLORS.length] }} />
+                                      {item.model || item.provider}
+                                    </strong>
+                                    <span>
+                                      {item.provider} · {formatPercent(item, tokenUsageStats.by_model)}
+                                    </span>
+                                  </div>
+                                  <span>{formatTokenCount(getUsageModelValue(item))}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="settings-help-text">
+                            暂无 token 用量。供应商返回 usage 后会自动记录；未返回 usage 的请求只计次数。
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -1409,3 +1672,91 @@ function Settings() {
 }
 
 export default Settings;
+
+const USAGE_CHART_COLORS = [
+  "#1d72f3",
+  "#15a06d",
+  "#f59e0b",
+  "#e14f73",
+  "#7c3aed",
+  "#0891b2",
+  "#ef4444",
+  "#64748b",
+];
+
+const formatTokenCount = (value: number): string => {
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(2)}M`;
+  }
+
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}K`;
+  }
+
+  return String(value);
+};
+
+const getUsagePointValue = (point: TokenUsageDailyPoint): number => {
+  return point.total_tokens || point.request_count;
+};
+
+const getUsageModelValue = (item: TokenUsageModelStats): number => {
+  return item.total_tokens || item.request_count;
+};
+
+const buildLineChartPoints = (points: TokenUsageDailyPoint[]): string => {
+  if (!points.length) {
+    return "";
+  }
+
+  const values = points.map(getUsagePointValue);
+  const max = Math.max(...values, 1);
+  const width = 300;
+  const height = 92;
+
+  return points
+    .map((point, index) => {
+      const x = 10 + (points.length === 1 ? width / 2 : (index / (points.length - 1)) * width);
+      const y = 104 - (getUsagePointValue(point) / max) * height;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+};
+
+const buildBarHeight = (
+  point: TokenUsageDailyPoint,
+  points: TokenUsageDailyPoint[]
+): number => {
+  const max = Math.max(...points.map(getUsagePointValue), 1);
+  return Math.max((getUsagePointValue(point) / max) * 100, 4);
+};
+
+const buildPieGradient = (items: TokenUsageModelStats[]): string => {
+  const total = items.reduce((sum, item) => sum + getUsageModelValue(item), 0);
+  if (total <= 0) {
+    return "conic-gradient(#dbe4ef 0deg 360deg)";
+  }
+
+  let cursor = 0;
+  const stops = items.map((item, index) => {
+    const start = cursor;
+    const size = (getUsageModelValue(item) / total) * 360;
+    cursor += size;
+    const color = USAGE_CHART_COLORS[index % USAGE_CHART_COLORS.length];
+    return `${color} ${start.toFixed(2)}deg ${cursor.toFixed(2)}deg`;
+  });
+
+  return `conic-gradient(${stops.join(", ")})`;
+};
+
+const formatPercent = (
+  item: TokenUsageModelStats,
+  items: TokenUsageModelStats[]
+): string => {
+  const total = items.reduce((sum, current) => sum + getUsageModelValue(current), 0);
+  if (total <= 0) {
+    return "0%";
+  }
+
+  return `${((getUsageModelValue(item) / total) * 100).toFixed(1)}%`;
+};

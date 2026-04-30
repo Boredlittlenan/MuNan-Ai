@@ -1,4 +1,4 @@
-use crate::ai::types::ChatMessage;
+use crate::ai::types::{AiResponse, ChatMessage, TokenUsage};
 use serde_json::json;
 
 /// 调用 mimo OpenAI、豆包或千问 API
@@ -7,7 +7,7 @@ pub async fn chat_api(
     api_key: &str,
     model: &str,
     messages: Vec<ChatMessage>,
-) -> Result<String, String> {
+) -> Result<AiResponse, String> {
     // 构造请求体
     let body = json!({
         "model": model,
@@ -50,8 +50,34 @@ pub async fn chat_api(
         .and_then(|m| m.get("message"))
         .ok_or_else(|| format!("响应中没有找到 message\n原始响应: {}", text))?;
     let content = extract_message_content(message);
+    let usage = extract_token_usage(&json);
 
-    Ok(content)
+    Ok(AiResponse { content, usage })
+}
+
+fn extract_token_usage(json: &serde_json::Value) -> Option<TokenUsage> {
+    let usage = json.get("usage")?;
+    let prompt_tokens = usage
+        .get("prompt_tokens")
+        .or_else(|| usage.get("input_tokens"))
+        .and_then(|item| item.as_i64())
+        .unwrap_or_default();
+    let completion_tokens = usage
+        .get("completion_tokens")
+        .or_else(|| usage.get("output_tokens"))
+        .and_then(|item| item.as_i64())
+        .unwrap_or_default();
+    let total_tokens = usage
+        .get("total_tokens")
+        .and_then(|item| item.as_i64())
+        .unwrap_or(prompt_tokens + completion_tokens);
+
+    Some(TokenUsage {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        is_precise: total_tokens > 0 || prompt_tokens > 0 || completion_tokens > 0,
+    })
 }
 
 fn extract_message_content(message: &serde_json::Value) -> String {

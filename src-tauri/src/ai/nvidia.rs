@@ -1,10 +1,13 @@
-use crate::ai::types::ChatMessage;
+use crate::ai::types::{AiResponse, ChatMessage};
 use crate::config::ModelConfig;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-pub async fn call_nvidia(messages: Vec<ChatMessage>, cfg: ModelConfig) -> Result<String, String> {
+pub async fn call_nvidia(
+    messages: Vec<ChatMessage>,
+    cfg: ModelConfig,
+) -> Result<AiResponse, String> {
     let body = json!({
         "model": cfg.model,
         "messages": messages,
@@ -97,7 +100,10 @@ pub async fn call_nvidia(messages: Vec<ChatMessage>, cfg: ModelConfig) -> Result
         return Err("NVIDIA 返回了空内容，请检查模型名、API Key 或输入内容。".into());
     }
 
-    Ok(content)
+    Ok(AiResponse {
+        content,
+        usage: None,
+    })
 }
 
 fn normalize_chat_url(base_url: &str) -> String {

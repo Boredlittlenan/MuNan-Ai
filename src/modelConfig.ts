@@ -90,11 +90,16 @@ export type WebDavConfig = {
   path: string;
 };
 
+export type UsageConfig = {
+  detail_retention_days: number;
+};
+
 export type AppConfig = Record<BuiltInModelType, ModelConfig> & {
   schema_version: number;
   speech: SpeechConfig;
   persona: PersonaConfig;
   webdav: WebDavConfig;
+  usage: UsageConfig;
   custom_models: Record<BuiltInModelType, string[]>;
   custom_providers: CustomProviderConfig[];
 };
@@ -214,6 +219,9 @@ export const createEmptyAppConfig = (): AppConfig => ({
     password: "",
     path: "munan-ai-settings.json",
   },
+  usage: {
+    detail_retention_days: 0,
+  },
   custom_models: {
     openai: [],
     deepseek: [],
@@ -317,6 +325,7 @@ export const normalizeAppConfig = (
         }>;
         persona?: Partial<PersonaConfig>;
         webdav?: Partial<WebDavConfig>;
+        usage?: Partial<UsageConfig>;
         custom_models?: Partial<Record<BuiltInModelType, string[]>>;
         custom_providers?: Partial<CustomProviderConfig>[];
         schema_version?: number;
@@ -367,6 +376,11 @@ export const normalizeAppConfig = (
     password: value?.webdav?.password ?? "",
     path: value?.webdav?.path ?? "munan-ai-settings.json",
   };
+  fallback.usage = {
+    detail_retention_days: normalizeRetentionDays(
+      value?.usage?.detail_retention_days ?? fallback.usage.detail_retention_days
+    ),
+  };
 
   for (const option of MODEL_OPTIONS) {
     fallback.custom_models[option.id] = Array.isArray(value?.custom_models?.[option.id])
@@ -393,6 +407,19 @@ export const normalizeAppConfig = (
     : [];
 
   return fallback;
+};
+
+export const normalizeRetentionDays = (value: number): number => {
+  const days = Math.round(Number(value));
+  if (!Number.isFinite(days)) {
+    return 0;
+  }
+
+  if (days <= 0) {
+    return 0;
+  }
+
+  return Math.min(Math.max(days, 7), 3650);
 };
 
 export const createEmptyConversations = (): Record<ModelType, Conversation[]> => ({

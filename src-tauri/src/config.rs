@@ -141,6 +141,24 @@ fn default_webdav_path() -> String {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UsageConfig {
+    #[serde(default = "default_usage_retention_days")]
+    pub detail_retention_days: i64,
+}
+
+impl Default for UsageConfig {
+    fn default() -> Self {
+        Self {
+            detail_retention_days: default_usage_retention_days(),
+        }
+    }
+}
+
+fn default_usage_retention_days() -> i64 {
+    0
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
@@ -161,6 +179,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub webdav: WebDavConfig,
     #[serde(default)]
+    pub usage: UsageConfig,
+    #[serde(default)]
     pub custom_models: HashMap<String, Vec<String>>,
     #[serde(default)]
     pub custom_providers: Vec<CustomProviderConfig>,
@@ -178,6 +198,7 @@ impl Default for AppConfig {
             speech: SpeechConfig::default(),
             persona: PersonaConfig::default(),
             webdav: WebDavConfig::default(),
+            usage: UsageConfig::default(),
             custom_models: HashMap::new(),
             custom_providers: Vec::new(),
         }

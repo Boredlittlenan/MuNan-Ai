@@ -1,5 +1,6 @@
-use crate::ai::types::ChatMessage;
+use crate::ai::types::{ChatMessage, TokenUsage};
 use crate::config::load_config;
+use crate::storage::{record_token_usage, TokenUsageRecord};
 use serde::Serialize;
 use tauri::AppHandle;
 
@@ -18,34 +19,90 @@ pub async fn chat_with_ai(
     app: AppHandle,
     messages: Vec<ChatMessage>,
     model: String,
+    conversation_id: Option<String>,
 ) -> Result<ChatReply, String> {
     let config = load_config(&app)?;
     let guided_messages =
         with_response_guidance(messages, config.persona.username, config.persona.prompt);
 
-    let reply = match model.as_str() {
-        "openai" => crate::ai::openai::call_openai(guided_messages, config.openai).await,
-        "deepseek" => crate::ai::deepseek::call_deepseek(guided_messages, config.deepseek).await,
-        "qwen" => crate::ai::qwen::call_qwen(guided_messages, config.qwen).await,
-        "mimo" => crate::ai::mimo::call_mimo(guided_messages, config.mimo).await,
-        "nvidia" => crate::ai::nvidia::call_nvidia(guided_messages, config.nvidia).await,
+    let (reply, provider, provider_model) = match model.as_str() {
+        "openai" => {
+            let provider_model = config.openai.model.clone();
+            (
+                crate::ai::openai::call_openai(guided_messages, config.openai).await?,
+                "openai".to_string(),
+                provider_model,
+            )
+        }
+        "deepseek" => {
+            let provider_model = config.deepseek.model.clone();
+            (
+                crate::ai::deepseek::call_deepseek(guided_messages, config.deepseek).await?,
+                "deepseek".to_string(),
+                provider_model,
+            )
+        }
+        "qwen" => {
+            let provider_model = config.qwen.model.clone();
+            (
+                crate::ai::qwen::call_qwen(guided_messages, config.qwen).await?,
+                "qwen".to_string(),
+                provider_model,
+            )
+        }
+        "mimo" => {
+            let provider_model = config.mimo.model.clone();
+            (
+                crate::ai::mimo::call_mimo(guided_messages, config.mimo).await?,
+                "mimo".to_string(),
+                provider_model,
+            )
+        }
+        "nvidia" => {
+            let provider_model = config.nvidia.model.clone();
+            (
+                crate::ai::nvidia::call_nvidia(guided_messages, config.nvidia).await?,
+                "nvidia".to_string(),
+                provider_model,
+            )
+        }
         _ => {
             let provider = config
                 .custom_providers
                 .into_iter()
                 .find(|provider| provider.id == model)
                 .ok_or_else(|| format!("未知模型: {}", model))?;
-            crate::ai::openai_like::chat_api(
-                &provider.base_url,
-                &provider.api_key,
-                &provider.model,
-                guided_messages,
+            (
+                crate::ai::openai_like::chat_api(
+                    &provider.base_url,
+                    &provider.api_key,
+                    &provider.model,
+                    guided_messages,
+                )
+                .await?,
+                provider.id,
+                provider.model,
             )
-            .await
         }
-    }?;
+    };
 
-    Ok(parse_chat_reply(&reply))
+    let usage = reply.usage.unwrap_or(TokenUsage {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        is_precise: false,
+    });
+    let _ = record_token_usage(
+        &app,
+        TokenUsageRecord {
+            provider,
+            model: provider_model,
+            conversation_id: conversation_id.unwrap_or_default(),
+            usage,
+        },
+    );
+
+    Ok(parse_chat_reply(&reply.content))
 }
 
 fn with_response_guidance(

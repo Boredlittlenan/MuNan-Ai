@@ -529,6 +529,7 @@ function App() {
       const reply = await invoke<ChatReplyResponse>("chat_with_ai", {
         model,
         messages: apiMessages,
+        conversationId: activeConversation.id,
       });
       const replyImages = extractImageAttachments(reply.content);
       const replyContent = stripImageMarkdown(reply.content);
@@ -909,9 +910,14 @@ function App() {
                 <h2>{currentModelMeta.label} 会话列表</h2>
               </div>
 
-              <button type="button" className="primary-button" onClick={createNewConversation}>
-                <IoAdd size={18} />
-                新建会话
+              <button
+                type="button"
+                className="icon-action conversation-create-button"
+                onClick={createNewConversation}
+                title="新建会话"
+                aria-label="新建会话"
+              >
+                <IoAdd size={20} />
               </button>
             </div>
 

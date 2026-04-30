@@ -108,6 +108,23 @@
   line-height: 1.25;
 }
 
+.conversation-create-button {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  flex: 0 0 42px;
+  color: #fff;
+  background: var(--sky);
+  border-color: rgba(29, 114, 243, 0.28);
+}
+
+.conversation-create-button:hover {
+  color: #fff;
+  background: #1b66d9;
+  border-color: rgba(29, 114, 243, 0.36);
+}
+
 .model-select-label {
   color: var(--text-3);
   font-size: 11px;
@@ -784,6 +801,12 @@
   .chat-sidebar .section-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .chat-sidebar .conversation-create-button {
+    align-self: flex-end;
+    width: 42px;
+    min-width: 42px;
   }
 
   .conversation-card {

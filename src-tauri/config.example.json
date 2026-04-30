@@ -60,6 +60,9 @@
     "password": "",
     "path": "munan-ai-settings.json"
   },
+  "usage": {
+    "detail_retention_days": 0
+  },
   "custom_models": {},
   "custom_providers": []
 }
