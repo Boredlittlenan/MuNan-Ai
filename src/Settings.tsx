@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { IconType } from "react-icons";
 import { useNavigate } from "react-router-dom";
 import {
   IoArrowBack,
+  IoAnalyticsOutline,
   IoCheckmarkCircle,
   IoCloudUploadOutline,
+  IoCubeOutline,
   IoDownloadOutline,
   IoEyeOffOutline,
   IoEyeOutline,
   IoInformationCircleOutline,
+  IoMicOutline,
+  IoPersonOutline,
   IoRefresh,
   IoSave,
 } from "react-icons/io5";
@@ -83,11 +88,12 @@ const SETTINGS_SECTIONS: Array<{
   id: SettingsSection;
   title: string;
   meta: string;
+  icon: IconType;
 }> = [
-  { id: "user", title: "基础配置", meta: "用户、默认模型与备份同步" },
-  { id: "model", title: "模型配置", meta: "供应商、密钥与模型名称" },
-  { id: "speech", title: "ASR / TTS 配置", meta: "语音识别与语音合成" },
-  { id: "usage", title: "用量统计", meta: "Token 消耗、趋势图与模型占比" },
+  { id: "user", title: "基础配置", meta: "用户、默认模型与备份同步", icon: IoPersonOutline },
+  { id: "model", title: "模型配置", meta: "供应商、密钥与模型名称", icon: IoCubeOutline },
+  { id: "speech", title: "ASR / TTS 配置", meta: "语音识别与语音合成", icon: IoMicOutline },
+  { id: "usage", title: "用量统计", meta: "Token 消耗、趋势图与模型占比", icon: IoAnalyticsOutline },
 ];
 
 /* =========================
@@ -692,23 +698,32 @@ function Settings() {
           </div>
 
           <div className="settings-category-list">
-            {SETTINGS_SECTIONS.map((section) => (
-              <button
-                key={section.id}
-                type="button"
-                className={`settings-category-card ${
-                  activeSection === section.id ? "is-active" : ""
-                }`}
-                onClick={() => {
-                  setActiveSection(section.id);
-                  setMessage("");
-                  setError("");
-                }}
-              >
-                <span className="settings-model-card__title">{section.title}</span>
-                <span className="settings-model-card__meta">{section.meta}</span>
-              </button>
-            ))}
+            {SETTINGS_SECTIONS.map((section) => {
+              const SectionIcon = section.icon;
+
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  className={`settings-category-card ${
+                    activeSection === section.id ? "is-active" : ""
+                  }`}
+                  onClick={() => {
+                    setActiveSection(section.id);
+                    setMessage("");
+                    setError("");
+                  }}
+                >
+                  <span className="settings-category-card__icon" aria-hidden="true">
+                    <SectionIcon size={18} />
+                  </span>
+                  <span className="settings-category-card__content">
+                    <span className="settings-model-card__title">{section.title}</span>
+                    <span className="settings-model-card__meta">{section.meta}</span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </aside>
 
@@ -798,59 +813,69 @@ function Settings() {
                       WebDAV 配置只保存在本机配置中，不会出现在导入/导出的备份内容里。
                     </p>
 
-                    <label htmlFor="webdav-url">WebDAV 地址</label>
-                    <input
-                      id="webdav-url"
-                      className="settings-input"
-                      type="text"
-                      value={config.webdav.url}
-                      placeholder="例如 https://example.com/dav/backups"
-                      onChange={(event) => updateWebDavField("url", event.target.value)}
-                    />
+                    <div className="webdav-settings-grid">
+                      <div className="webdav-settings-field">
+                        <label htmlFor="webdav-url">WebDAV 地址</label>
+                        <input
+                          id="webdav-url"
+                          className="settings-input"
+                          type="text"
+                          value={config.webdav.url}
+                          placeholder="例如 https://example.com/dav/backups"
+                          onChange={(event) => updateWebDavField("url", event.target.value)}
+                        />
+                      </div>
 
-                    <label htmlFor="webdav-path">备份文件路径</label>
-                    <input
-                      id="webdav-path"
-                      className="settings-input"
-                      type="text"
-                      value={config.webdav.path}
-                      placeholder="munan-ai-settings.json"
-                      onChange={(event) => updateWebDavField("path", event.target.value)}
-                    />
+                      <div className="webdav-settings-field">
+                        <label htmlFor="webdav-path">备份文件路径</label>
+                        <input
+                          id="webdav-path"
+                          className="settings-input"
+                          type="text"
+                          value={config.webdav.path}
+                          placeholder="munan-ai-settings.json"
+                          onChange={(event) => updateWebDavField("path", event.target.value)}
+                        />
+                      </div>
 
-                    <label htmlFor="webdav-username">用户名</label>
-                    <input
-                      id="webdav-username"
-                      className="settings-input"
-                      type="text"
-                      value={config.webdav.username}
-                      placeholder="WebDAV 用户名，可留空"
-                      onChange={(event) => updateWebDavField("username", event.target.value)}
-                    />
+                      <div className="webdav-settings-field">
+                        <label htmlFor="webdav-username">用户名</label>
+                        <input
+                          id="webdav-username"
+                          className="settings-input"
+                          type="text"
+                          value={config.webdav.username}
+                          placeholder="WebDAV 用户名，可留空"
+                          onChange={(event) => updateWebDavField("username", event.target.value)}
+                        />
+                      </div>
 
-                    <label htmlFor="webdav-password">密码</label>
-                    <div className="password-input-row">
-                      <input
-                        id="webdav-password"
-                        className="settings-input"
-                        type={passwordInputType("webdav-password")}
-                        value={config.webdav.password}
-                        placeholder="WebDAV 密码或应用专用密码"
-                        onChange={(event) => updateWebDavField("password", event.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className="password-toggle-button"
-                        onClick={() => togglePasswordVisibility("webdav-password")}
-                        aria-label={isPasswordVisible("webdav-password") ? "隐藏 WebDAV 密码" : "显示 WebDAV 密码"}
-                        title={isPasswordVisible("webdav-password") ? "隐藏" : "显示"}
-                      >
-                        {isPasswordVisible("webdav-password") ? (
-                          <IoEyeOffOutline size={17} />
-                        ) : (
-                          <IoEyeOutline size={17} />
-                        )}
-                      </button>
+                      <div className="webdav-settings-field">
+                        <label htmlFor="webdav-password">密码</label>
+                        <div className="password-input-row">
+                          <input
+                            id="webdav-password"
+                            className="settings-input"
+                            type={passwordInputType("webdav-password")}
+                            value={config.webdav.password}
+                            placeholder="WebDAV 密码或应用专用密码"
+                            onChange={(event) => updateWebDavField("password", event.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="password-toggle-button"
+                            onClick={() => togglePasswordVisibility("webdav-password")}
+                            aria-label={isPasswordVisible("webdav-password") ? "隐藏 WebDAV 密码" : "显示 WebDAV 密码"}
+                            title={isPasswordVisible("webdav-password") ? "隐藏" : "显示"}
+                          >
+                            {isPasswordVisible("webdav-password") ? (
+                              <IoEyeOffOutline size={17} />
+                            ) : (
+                              <IoEyeOutline size={17} />
+                            )}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
 

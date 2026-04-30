@@ -631,39 +631,60 @@ select:focus {
 .custom-date__header strong {
   color: var(--text-1);
   font-size: 14px;
+  font-weight: 800;
 }
 
 .custom-date__nav,
 .custom-date__text-button {
   border: 0;
-  background: rgba(239, 246, 255, 0.9);
-  color: #2563eb;
+  background: rgba(244, 248, 253, 0.92);
+  color: #48627f;
   cursor: pointer;
   transition:
     background-color 0.16s ease,
-    color 0.16s ease;
+    color 0.16s ease,
+    border-color 0.16s ease;
 }
 
 .custom-date__nav {
   width: 32px;
   height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(122, 139, 163, 0.14);
   border-radius: 999px;
-  font-size: 22px;
-  line-height: 1;
 }
 
 .custom-date__text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 30px;
-  padding: 0 10px;
+  padding: 0 12px;
+  border: 1px solid rgba(122, 139, 163, 0.14);
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
 }
 
+.custom-date__nav-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.custom-date__action-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
 .custom-date__nav:hover,
 .custom-date__text-button:hover {
-  background: rgba(219, 234, 254, 0.98);
-  color: #1d4ed8;
+  border-color: rgba(29, 114, 243, 0.22);
+  background: rgba(232, 241, 255, 0.98);
+  color: #1d72f3;
 }
 
 .custom-date__weekdays,

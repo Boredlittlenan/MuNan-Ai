@@ -10,6 +10,73 @@ type DatePickerProps = {
 
 const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
 
+function ChevronIcon({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className="custom-date__nav-icon"
+      fill="none"
+      viewBox="0 0 20 20"
+    >
+      <path
+        d={direction === "left" ? "M12.5 15 7.5 10l5-5" : "m7.5 15 5-5-5-5"}
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+}
+
+function ClearIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="custom-date__action-icon"
+      fill="none"
+      viewBox="0 0 20 20"
+    >
+      <path
+        d="m7 7 6 6m0-6-6 6"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.9"
+      />
+      <path
+        d="M10 17.25a7.25 7.25 0 1 0 0-14.5 7.25 7.25 0 0 0 0 14.5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
+function TodayIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="custom-date__action-icon"
+      fill="none"
+      viewBox="0 0 20 20"
+    >
+      <path
+        d="M5.25 4.25h9.5a2 2 0 0 1 2 2v8.25a2 2 0 0 1-2 2h-9.5a2 2 0 0 1-2-2V6.25a2 2 0 0 1 2-2Z"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+      />
+      <path
+        d="M6.5 2.75v3m7-3v3M3.75 7.75h12.5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.6"
+      />
+      <path d="M7.25 10.4h5.5v3.35h-5.5z" fill="currentColor" opacity="0.18" />
+    </svg>
+  );
+}
+
 function parseDateValue(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
 
@@ -136,14 +203,26 @@ export function DatePicker({
       {open && (
         <div className="custom-date__panel" role="dialog" aria-label="选择日期">
           <div className="custom-date__header">
-            <button type="button" className="custom-date__nav" onClick={() => changeMonth(-1)}>
-              ‹
+            <button
+              type="button"
+              className="custom-date__nav"
+              onClick={() => changeMonth(-1)}
+              aria-label="上个月"
+              title="上个月"
+            >
+              <ChevronIcon direction="left" />
             </button>
             <strong>
               {viewDate.getFullYear()}年{viewDate.getMonth() + 1}月
             </strong>
-            <button type="button" className="custom-date__nav" onClick={() => changeMonth(1)}>
-              ›
+            <button
+              type="button"
+              className="custom-date__nav"
+              onClick={() => changeMonth(1)}
+              aria-label="下个月"
+              title="下个月"
+            >
+              <ChevronIcon direction="right" />
             </button>
           </div>
 
@@ -182,14 +261,16 @@ export function DatePicker({
                 setOpen(false);
               }}
             >
-              清空
+              <ClearIcon />
+              <span>清空</span>
             </button>
             <button
               type="button"
               className="custom-date__text-button"
               onClick={() => selectDate(new Date())}
             >
-              今天
+              <TodayIcon />
+              <span>今天</span>
             </button>
           </div>
         </div>

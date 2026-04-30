@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Link } from "react-router-dom";
 import {
-  IoAdd,
   IoChatbubbleEllipses,
   IoClose,
+  IoCreateOutline,
   IoMenu,
   IoMic,
   IoImageOutline,
@@ -914,7 +914,7 @@ function App() {
                 title="新建会话"
                 aria-label="新建会话"
               >
-                <IoAdd size={20} />
+                <IoCreateOutline size={17} />
               </button>
             </div>
 
