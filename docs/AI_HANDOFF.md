@@ -378,7 +378,7 @@ ASR 配置示例：
   },
   "persona": {
     "enabled": true,
-    "username": "木南",
+    "username": "MuNan",
     "prompt": "你是 MuNan AI，一个温和、清晰、可靠的桌面 AI 助手。"
   },
   "webdav": {

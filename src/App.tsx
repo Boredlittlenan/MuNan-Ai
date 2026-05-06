@@ -82,10 +82,6 @@ type AgentShellPlan = {
   reason: string;
 };
 
-type AgentShellToolCall = {
-  command: string;
-};
-
 type AgentTavilyPlan = {
   should_search: boolean;
   query: string;
@@ -103,9 +99,15 @@ type AgentTavilySearchResult = {
   }>;
 };
 
-type AgentTavilyToolCall = {
-  query: string;
-};
+type AgentToolCall =
+  | {
+      kind: "shell";
+      command: string;
+    }
+  | {
+      kind: "tavily";
+      query: string;
+    };
 
 const MAX_IMAGE_ATTACHMENTS = 4;
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
@@ -511,7 +513,58 @@ function App() {
     }));
   };
 
-  const runAgentQuickAction = async (text: string): Promise<Message | null> => {
+  const summarizeAgentToolContexts = async (
+    optimisticMessages: Message[],
+    conversationId: string,
+    toolContexts: string[],
+    intro: string,
+    assistantContent = ""
+  ): Promise<ChatReplyResponse> => {
+    return await invoke<ChatReplyResponse>("chat_with_ai", {
+      model,
+      messages: [
+        ...optimisticMessages.map(toApiMessage),
+        ...(assistantContent.trim()
+          ? [
+              {
+                role: "assistant",
+                content: assistantContent.trim(),
+              },
+            ]
+          : []),
+        {
+          role: "user",
+          content: `${intro}\n\n${toolContexts.join("\n\n---\n\n")}`,
+        },
+      ],
+      conversationId,
+    });
+  };
+
+  const createAgentSummaryMessage = (
+    reply: ChatReplyResponse,
+    toolContexts: string[] = []
+  ): Message => {
+    const replyImages = extractImageAttachments(reply.content);
+    const replyContent = stripImageMarkdown(stripAgentToolCalls(reply.content));
+
+    return {
+      role: "ai",
+      content: replyContent || stripAgentToolCalls(reply.content),
+      tts_text: reply.tts_text,
+      original_content: appendAgentToolOriginalContent(
+        reply.original_content || reply.content,
+        toolContexts
+      ),
+      attachments: replyImages,
+    };
+  };
+
+  const runAgentQuickAction = async (
+    text: string,
+    optimisticMessages: Message[],
+    conversationId: string
+  ): Promise<Message | null> => {
     const action = parseAgentQuickAction(text);
 
     if (!action) {
@@ -604,10 +657,30 @@ function App() {
             cwd: action.cwd,
           },
         });
-        return {
-          role: "ai",
-          content: formatShellResult(result),
-        };
+        const toolContext = buildShellToolContext(
+          {
+            should_run: true,
+            command: action.command,
+            reason: action.confirmText,
+          },
+          result
+        );
+
+        try {
+          const reply = await summarizeAgentToolContexts(
+            optimisticMessages,
+            conversationId,
+            [toolContext],
+            "应用已真实执行本地 Shell。请基于下面的真实执行结果直接回复用户，明确任务是否完成，不要编造。"
+          );
+          return createAgentSummaryMessage(reply, [toolContext]);
+        } catch (summaryError) {
+          return {
+            role: "ai",
+            content: `Shell 已执行，但模型总结失败：${String(summaryError)}`,
+            original_content: toolContext,
+          };
+        }
       }
 
       await navigator.clipboard.writeText(action.text);
@@ -670,27 +743,14 @@ function App() {
       };
     }
     const toolContext = buildShellToolContext(plan, result);
-    const reply = await invoke<ChatReplyResponse>("chat_with_ai", {
-      model,
-      messages: [
-        ...optimisticMessages.map(toApiMessage),
-        {
-          role: "user",
-          content: toolContext,
-        },
-      ],
+    const reply = await summarizeAgentToolContexts(
+      optimisticMessages,
       conversationId,
-    });
-    const replyImages = extractImageAttachments(reply.content);
-    const replyContent = stripImageMarkdown(reply.content);
+      [toolContext],
+      "应用已根据用户需求真实执行本地 Shell。请基于下面的真实执行结果直接回复用户，明确任务是否完成，不要编造。"
+    );
 
-    return {
-      role: "ai",
-      content: replyContent || reply.content,
-      tts_text: reply.tts_text,
-      original_content: reply.original_content || reply.content,
-      attachments: replyImages,
-    };
+    return createAgentSummaryMessage(reply, [toolContext]);
   };
 
   const runAgentAutoTavilyAction = async (
@@ -742,27 +802,14 @@ function App() {
     }
 
     const toolContext = buildTavilyToolContext(plan, result);
-    const reply = await invoke<ChatReplyResponse>("chat_with_ai", {
-      model,
-      messages: [
-        ...optimisticMessages.map(toApiMessage),
-        {
-          role: "user",
-          content: toolContext,
-        },
-      ],
+    const reply = await summarizeAgentToolContexts(
+      optimisticMessages,
       conversationId,
-    });
-    const replyImages = extractImageAttachments(reply.content);
-    const replyContent = stripImageMarkdown(reply.content);
+      [toolContext],
+      "应用已根据用户需求真实调用 Tavily 联网搜索。请基于下面的真实搜索结果直接回复用户，必要时给出来源链接，不要编造。"
+    );
 
-    return {
-      role: "ai",
-      content: replyContent || reply.content,
-      tts_text: reply.tts_text,
-      original_content: reply.original_content || reply.content,
-      attachments: replyImages,
-    };
+    return createAgentSummaryMessage(reply, [toolContext]);
   };
 
   const resolveAgentToolCallReply = async (
@@ -771,10 +818,15 @@ function App() {
     conversationId: string
   ): Promise<ChatReplyResponse> => {
     const rawReply = reply.original_content || reply.content;
-    const shellToolCall = extractShellToolCall(rawReply);
-    const tavilyToolCall = extractTavilyToolCall(rawReply);
+    const latestUserText = getLatestUserText(optimisticMessages);
+    const toolCalls = extractAgentToolCalls(
+      rawReply,
+      appConfig.agent.shell_enabled && isLocalActionRequest(latestUserText)
+    );
+    const shellToolCall = toolCalls.find((toolCall) => toolCall.kind === "shell");
+    const tavilyToolCall = toolCalls.find((toolCall) => toolCall.kind === "tavily");
 
-    if (!shellToolCall && !tavilyToolCall) {
+    if (toolCalls.length === 0) {
       return reply;
     }
 
@@ -810,93 +862,73 @@ function App() {
       };
     }
 
-    if (shellToolCall) {
-      let result: AgentShellResult;
-      try {
-        result = await invoke<AgentShellResult>("agent_run_shell", {
-          request: {
-            command: shellToolCall.command,
-            cwd: "",
-          },
-        });
-      } catch (shellError) {
-        return {
-          content: `Agent 已识别到 Shell 工具调用，但命令执行失败。\n\n命令：\`${shellToolCall.command}\`\n错误：${String(shellError)}`,
-          tts_text: "(抱歉 平静)我识别到了需要执行命令，但这次命令执行失败了。请查看屏幕上的错误信息。",
-          original_content: rawReply,
-        };
+    const toolContexts: string[] = [];
+
+    for (const [index, toolCall] of toolCalls.entries()) {
+      if (toolCall.kind === "shell") {
+        try {
+          const result = await invoke<AgentShellResult>("agent_run_shell", {
+            request: {
+              command: toolCall.command,
+              cwd: "",
+            },
+          });
+          toolContexts.push(
+            buildShellToolContext(
+              {
+                should_run: true,
+                command: toolCall.command,
+                reason: `模型在回复中请求第 ${index + 1} 个 execute_shell 工具调用。`,
+              },
+              result
+            )
+          );
+        } catch (shellError) {
+          toolContexts.push(
+            `第 ${index + 1} 个 Shell 工具调用失败。\n命令：\`${toolCall.command}\`\n错误：${String(shellError)}`
+          );
+        }
+      } else {
+        try {
+          const result = await invoke<AgentTavilySearchResult>("agent_tavily_search", {
+            request: {
+              query: toolCall.query,
+              maxResults: appConfig.agent.tavily_max_results,
+            },
+          });
+          toolContexts.push(
+            buildTavilyToolContext(
+              {
+                should_search: true,
+                query: toolCall.query,
+                reason: `模型在回复中请求第 ${index + 1} 个 tavily_search 工具调用。`,
+              },
+              result
+            )
+          );
+        } catch (searchError) {
+          toolContexts.push(
+            `第 ${index + 1} 个 Tavily 搜索工具调用失败。\n搜索词：\`${toolCall.query}\`\n错误：${String(searchError)}`
+          );
+        }
       }
-
-      const toolContext = buildShellToolContext(
-        {
-          should_run: true,
-          command: shellToolCall.command,
-          reason: "模型在回复中请求 execute_shell 工具调用。",
-        },
-        result
-      );
-
-      return await invoke<ChatReplyResponse>("chat_with_ai", {
-        model,
-        messages: [
-          ...optimisticMessages.map(toApiMessage),
-          {
-            role: "assistant",
-            content: stripAgentToolCalls(rawReply),
-          },
-          {
-            role: "user",
-            content: toolContext,
-          },
-        ],
-        conversationId,
-      });
     }
 
-    if (tavilyToolCall) {
-      let result: AgentTavilySearchResult;
-      try {
-        result = await invoke<AgentTavilySearchResult>("agent_tavily_search", {
-          request: {
-            query: tavilyToolCall.query,
-            maxResults: appConfig.agent.tavily_max_results,
-          },
-        });
-      } catch (searchError) {
-        return {
-          content: `Agent 已识别到 Tavily 搜索工具调用，但搜索失败。\n\n搜索词：\`${tavilyToolCall.query}\`\n错误：${String(searchError)}`,
-          tts_text: "(抱歉 平静)我识别到了需要联网搜索，但这次搜索失败了。请查看屏幕上的错误信息。",
-          original_content: rawReply,
-        };
-      }
+    const finalReply = await summarizeAgentToolContexts(
+      optimisticMessages,
+      conversationId,
+      toolContexts,
+      `你刚刚请求了 ${toolCalls.length} 个 Agent 工具调用，应用已按顺序真实执行。请基于下面所有真实结果回复用户，明确哪些任务完成了，哪些任务受系统限制未完成，不要编造。`,
+      stripAgentToolCalls(rawReply)
+    );
 
-      const toolContext = buildTavilyToolContext(
-        {
-          should_search: true,
-          query: tavilyToolCall.query,
-          reason: "模型在回复中请求 tavily_search 工具调用。",
-        },
-        result
-      );
-
-      return await invoke<ChatReplyResponse>("chat_with_ai", {
-        model,
-        messages: [
-          ...optimisticMessages.map(toApiMessage),
-          {
-            role: "assistant",
-            content: stripAgentToolCalls(rawReply),
-          },
-          {
-            role: "user",
-            content: toolContext,
-          },
-        ],
-        conversationId,
-      });
-    }
-
-    return reply;
+    return {
+      ...finalReply,
+      original_content: appendAgentToolOriginalContent(
+        finalReply.original_content || finalReply.content || rawReply,
+        toolContexts
+      ),
+    };
   };
 
   /**
@@ -960,7 +992,11 @@ function App() {
     setLoading(true);
 
     try {
-      const agentReply = await runAgentQuickAction(input.trim());
+      const agentReply = await runAgentQuickAction(
+        input.trim(),
+        optimisticMessages,
+        activeConversation.id
+      );
 
       if (agentReply) {
         setConversations((previous) => ({
@@ -1843,6 +1879,18 @@ const parseAgentQuickAction = (text: string): AgentQuickAction | null => {
     return null;
   }
 
+  const createFolderCommand = extractCreateFolderCommand(trimmed);
+  if (createFolderCommand) {
+    return {
+      kind: "shell",
+      category: "system",
+      skill: "system.shell",
+      command: createFolderCommand,
+      cwd: "",
+      confirmText: `创建文件夹：${createFolderCommand}`,
+    };
+  }
+
   const shellCommand = extractShellCommand(trimmed);
   if (shellCommand) {
     return {
@@ -1994,77 +2042,145 @@ const extractShellCommand = (text: string): string | null => {
   return null;
 };
 
-const extractShellToolCall = (text: string): AgentShellToolCall | null => {
-  const xmlCommand = text.match(
-    /<tool_call>[\s\S]*?<function\s*=\s*["']?execute_shell["']?\s*>[\s\S]*?<parameter\s*=\s*["']?command["']?\s*>([\s\S]*?)<\/parameter>[\s\S]*?<\/function>[\s\S]*?<\/tool_call>/i
-  );
-  const command = xmlCommand?.[1]?.trim();
-
-  if (command) {
-    return { command: decodeBasicHtmlEntities(command) };
-  }
-
-  const jsonCall = text.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/i);
-  if (!jsonCall) {
+const extractCreateFolderCommand = (text: string): string | null => {
+  if (!/(新建|创建|建立).*(文件夹|目录)/.test(text)) {
     return null;
   }
 
-  try {
-    const parsed = JSON.parse(jsonCall[1]) as {
-      function?: string;
-      name?: string;
-      arguments?: { command?: string };
-      parameters?: { command?: string };
-      command?: string;
-    };
-    const functionName = parsed.function || parsed.name;
-    const jsonCommand =
-      parsed.command || parsed.arguments?.command || parsed.parameters?.command || "";
+  const folderName =
+    text.match(/(?:叫|名为|名称为|名字叫)\s*[「“"']?([^」”"'\s，。；]+)[」”"']?/i)?.[1]?.trim() ||
+    text.match(/(?:文件夹|目录)\s*[「“"']([^」”"']+)[」”"']/i)?.[1]?.trim() ||
+    text.match(/(?:文件夹|目录)\s+([^\s，。；]+)/i)?.[1]?.trim();
 
-    if (functionName === "execute_shell" && jsonCommand.trim()) {
-      return { command: jsonCommand.trim() };
-    }
-  } catch {
+  if (!folderName) {
     return null;
   }
 
-  return null;
+  const escapedFolderName = escapePowerShellSingleQuotedString(folderName);
+  const targetExpression = /桌面|desktop/i.test(text)
+    ? `Join-Path $env:USERPROFILE 'Desktop\\${escapedFolderName}'`
+    : `'${escapedFolderName}'`;
+
+  return `$target = ${targetExpression}; New-Item -ItemType Directory -Path $target -Force | Select-Object FullName`;
 };
 
-const extractTavilyToolCall = (text: string): AgentTavilyToolCall | null => {
-  const xmlQuery = text.match(
-    /<tool_call>[\s\S]*?<function\s*=\s*["']?tavily_search["']?\s*>[\s\S]*?<parameter\s*=\s*["']?query["']?\s*>([\s\S]*?)<\/parameter>[\s\S]*?<\/function>[\s\S]*?<\/tool_call>/i
-  );
-  const query = xmlQuery?.[1]?.trim();
+const escapePowerShellSingleQuotedString = (value: string): string => {
+  return value.replace(/'/g, "''").replace(/[\\/:*?"<>|]/g, "_");
+};
 
-  if (query) {
-    return { query: decodeBasicHtmlEntities(query) };
-  }
+const extractAgentToolCalls = (
+  text: string,
+  includeShellCodeBlocks = false
+): AgentToolCall[] => {
+  const calls: AgentToolCall[] = [];
+  const blockPattern = /<tool_call>([\s\S]*?)<\/tool_call>/gi;
+  let match: RegExpExecArray | null;
 
-  const jsonCall = text.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/i);
-  if (!jsonCall) {
-    return null;
-  }
+  while ((match = blockPattern.exec(text))) {
+    const block = match[1];
+    const xmlFunction = block.match(/<function\s*=\s*["']?([a-zA-Z0-9_-]+)["']?\s*>/i);
+    const functionName = xmlFunction?.[1]?.trim();
 
-  try {
-    const parsed = JSON.parse(jsonCall[1]) as {
-      function?: string;
-      name?: string;
-      arguments?: { query?: string };
-      parameters?: { query?: string };
-      query?: string;
-    };
-    const functionName = parsed.function || parsed.name;
-    const jsonQuery = parsed.query || parsed.arguments?.query || parsed.parameters?.query || "";
-
-    if (functionName === "tavily_search" && jsonQuery.trim()) {
-      return { query: jsonQuery.trim() };
+    if (functionName === "execute_shell") {
+      const command = extractXmlParameter(block, "command");
+      if (command) {
+        calls.push({ kind: "shell", command });
+      }
+      continue;
     }
-  } catch {
-    return null;
+
+    if (functionName === "tavily_search") {
+      const query = extractXmlParameter(block, "query");
+      if (query) {
+        calls.push({ kind: "tavily", query });
+      }
+      continue;
+    }
+
+    const jsonCall = block.match(/\{[\s\S]*\}/);
+    if (!jsonCall) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(jsonCall[0]) as {
+        function?: string;
+        name?: string;
+        arguments?: { command?: string; query?: string };
+        parameters?: { command?: string; query?: string };
+        command?: string;
+        query?: string;
+      };
+      const jsonFunctionName = parsed.function || parsed.name;
+
+      if (jsonFunctionName === "execute_shell") {
+        const command =
+          parsed.command || parsed.arguments?.command || parsed.parameters?.command || "";
+        if (command.trim()) {
+          calls.push({ kind: "shell", command: command.trim() });
+        }
+      }
+
+      if (jsonFunctionName === "tavily_search") {
+        const query = parsed.query || parsed.arguments?.query || parsed.parameters?.query || "";
+        if (query.trim()) {
+          calls.push({ kind: "tavily", query: query.trim() });
+        }
+      }
+    } catch {
+      continue;
+    }
   }
 
-  return null;
+  if (calls.length === 0 && includeShellCodeBlocks) {
+    for (const command of extractShellCodeBlocks(text)) {
+      calls.push({ kind: "shell", command });
+    }
+  }
+
+  return calls;
+};
+
+const extractShellCodeBlocks = (text: string): string[] => {
+  const commands: string[] = [];
+  const codeBlockPattern = /```(?:powershell|pwsh|shell|bash|sh|ps1)?\s*([\s\S]*?)```/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeBlockPattern.exec(text))) {
+    const command = match[1].trim();
+
+    if (command && looksLikeShellCommand(command)) {
+      commands.push(command);
+    }
+  }
+
+  return commands;
+};
+
+const looksLikeShellCommand = (command: string): boolean => {
+  return /(^|\n)\s*(New-Item|Remove-Item|Copy-Item|Move-Item|Rename-Item|Set-Item|Get-ChildItem|Test-Path|mkdir|md|ni|cargo|pnpm|npm|git|powershell|pwsh)\b/i.test(
+    command
+  );
+};
+
+const getLatestUserText = (messages: Message[]): string => {
+  return [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
+};
+
+const isLocalActionRequest = (text: string): boolean => {
+  return /(桌面|文件夹|文件|目录|路径|新建|创建|删除|复制|移动|重命名|运行|执行|命令|构建|测试|检查|打开|保存)/.test(
+    text
+  );
+};
+
+const extractXmlParameter = (block: string, name: string): string | null => {
+  const pattern = new RegExp(
+    `<parameter\\s*=\\s*["']?${name}["']?\\s*>([\\s\\S]*?)<\\/parameter>`,
+    "i"
+  );
+  const value = block.match(pattern)?.[1]?.trim();
+
+  return value ? decodeBasicHtmlEntities(value) : null;
 };
 
 const stripAgentToolCalls = (text: string): string => {
@@ -2078,17 +2194,6 @@ const decodeBasicHtmlEntities = (text: string): string => {
     .replace(/&quot;/g, "\"")
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, "&");
-};
-
-const formatShellResult = (result: AgentShellResult): string => {
-  const exitStatus = result.timed_out ? "已超时" : `退出码 ${result.exit_code ?? "未知"}`;
-  const stdout = escapeMarkdownFence(result.stdout.trim() || "(无)");
-  const stderr = result.stderr.trim();
-  const stderrBlock = stderr
-    ? `\n\nstderr:\n\`\`\`\n${escapeMarkdownFence(stderr)}\n\`\`\``
-    : "";
-
-  return `Shell 执行完成：${exitStatus}\n\n命令：\`${result.command}\`\n目录：\`${result.cwd || "."}\`\n\nstdout:\n\`\`\`\n${stdout}\n\`\`\`${stderrBlock}`;
 };
 
 const buildShellToolContext = (plan: AgentShellPlan, result: AgentShellResult): string => {
@@ -2117,6 +2222,17 @@ const buildTavilyToolContext = (
     : "(没有返回搜索结果)";
 
   return `你刚刚根据用户需求调用了 Tavily 联网搜索。请基于下面的真实搜索结果回答用户，尽量标注来源链接，不要编造没有出现在搜索结果里的事实。\n\n规划理由：${plan.reason || "未提供"}\n搜索词：${result.query || plan.query}\n\nTavily Answer:\n${answer || "(无)"}\n\n搜索结果:\n${results}`;
+};
+
+const appendAgentToolOriginalContent = (
+  originalContent: string,
+  toolContexts: string[]
+): string => {
+  if (toolContexts.length === 0) {
+    return originalContent;
+  }
+
+  return `${originalContent}\n\n--- Agent 工具原始结果 ---\n${toolContexts.join("\n\n---\n\n")}`;
 };
 
 const escapeMarkdownFence = (text: string): string => {

@@ -153,8 +153,11 @@ pub async fn agent_plan_shell_action(
 当前工作目录：{}\n\
 输出必须是纯 JSON，不能有 Markdown，格式：{{\"should_run\":true|false,\"command\":\"...\",\"reason\":\"...\"}}。\n\
 当用户需要你检查项目、查看文件、运行构建/测试/格式化、查看 Git 状态、定位报错、读取本地环境信息时，should_run=true。\n\
-当用户只是闲聊、解释概念、写作、翻译、普通问答，或者没有明确需要本地信息时，should_run=false。\n\
-命令使用 PowerShell 语法，并尽量选择能直接推进任务的一条命令。",
+当用户要求创建、移动、复制、重命名文件或文件夹等明确本地操作时，should_run=true，并生成实际执行该操作的命令，不要只生成查看命令。\n\
+当用户的需求包含多个本地步骤时，可以把多个 PowerShell 语句用分号组合成一条命令，按顺序完成。\n\
+如果用户要求的是 Windows Explorer 桌面图标排序、窗口操作等 PowerShell 难以可靠控制的 GUI 行为，命令中只完成能可靠执行的部分，并在 reason 里说明剩余部分需要用户手动完成。\n\
+当用户只是闲聊、解释概念、写作、翻译、普通问答，或者没有明确需要本地信息/本地操作时，should_run=false。\n\
+命令使用 PowerShell 语法，并尽量选择能直接完成或推进任务的一条命令。",
                 current_dir
             ),
         ),
