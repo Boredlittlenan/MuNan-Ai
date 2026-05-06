@@ -43,6 +43,7 @@ import {
   normalizeAppConfig,
   saveUserState,
   isModelConfigured,
+  isAgentSkillEnabled,
   updateModelConfig,
 } from "./modelConfig";
 
@@ -587,27 +588,21 @@ function App() {
 
     if (
       action.category === "browser" &&
-      (!appConfig.agent.browser_enabled || !appConfig.agent.enabled_skills.includes(action.skill))
+      !isAgentSkillEnabled(appConfig.agent, action.skill)
     ) {
       return {
         role: "ai",
-        content: `浏览器技能 ${action.skill} 还没有启用。请到设置页的“Agent 设置”里开启浏览器操作和对应技能。`,
+        content: `Agent 工具 ${action.skill} 还没有启用。请到设置页的“Agent 设置”里打开对应工具。`,
       };
     }
 
-    const systemCapabilityEnabled =
-      action.kind === "shell" ? appConfig.agent.shell_enabled : appConfig.agent.system_enabled;
-
     if (
       action.category === "system" &&
-      (!systemCapabilityEnabled || !appConfig.agent.enabled_skills.includes(action.skill))
+      !isAgentSkillEnabled(appConfig.agent, action.skill)
     ) {
       return {
         role: "ai",
-        content:
-          action.kind === "shell"
-            ? `Shell 技能 ${action.skill} 还没有启用。请到设置页的“Agent 设置”里开启 Shell 执行和对应技能。`
-            : `系统技能 ${action.skill} 还没有启用。请到设置页的“Agent 设置”里开启系统操作和对应技能。`,
+        content: `Agent 工具 ${action.skill} 还没有启用。请到设置页的“Agent 设置”里打开对应工具。`,
       };
     }
 
@@ -704,8 +699,7 @@ function App() {
     if (
       !currentModelReady ||
       !appConfig.agent.enabled ||
-      !appConfig.agent.shell_enabled ||
-      !appConfig.agent.enabled_skills.includes("system.shell")
+      !isAgentSkillEnabled(appConfig.agent, "system.shell")
     ) {
       return null;
     }
@@ -761,9 +755,8 @@ function App() {
     if (
       !currentModelReady ||
       !appConfig.agent.enabled ||
-      !appConfig.agent.tavily_enabled ||
       !appConfig.agent.tavily_api_key.trim() ||
-      !appConfig.agent.enabled_skills.includes("search.tavily")
+      !isAgentSkillEnabled(appConfig.agent, "search.tavily")
     ) {
       return null;
     }
@@ -821,7 +814,7 @@ function App() {
     const latestUserText = getLatestUserText(optimisticMessages);
     const toolCalls = extractAgentToolCalls(
       rawReply,
-      appConfig.agent.shell_enabled && isLocalActionRequest(latestUserText)
+      isAgentSkillEnabled(appConfig.agent, "system.shell") && isLocalActionRequest(latestUserText)
     );
     const shellToolCall = toolCalls.find((toolCall) => toolCall.kind === "shell");
     const tavilyToolCall = toolCalls.find((toolCall) => toolCall.kind === "tavily");
@@ -840,10 +833,10 @@ function App() {
 
     if (
       shellToolCall &&
-      (!appConfig.agent.shell_enabled || !appConfig.agent.enabled_skills.includes("system.shell"))
+      !isAgentSkillEnabled(appConfig.agent, "system.shell")
     ) {
       return {
-        content: "模型请求执行 Shell 工具，但 Agent 的 Shell 执行能力没有开启。请到设置页开启 Agent 总开关、Shell 执行，并确认技能白名单包含 system.shell。",
+        content: "模型请求执行 Shell 工具，但 system.shell 还没有启用。请到设置页开启 Agent 总开关，并打开 Shell 执行工具。",
         tts_text: "(平静)模型请求执行本地命令，但 Shell 能力还没有开启。请到设置页打开对应开关。",
         original_content: rawReply,
       };
@@ -851,12 +844,11 @@ function App() {
 
     if (
       tavilyToolCall &&
-      (!appConfig.agent.tavily_enabled ||
-        !appConfig.agent.tavily_api_key.trim() ||
-        !appConfig.agent.enabled_skills.includes("search.tavily"))
+      (!isAgentSkillEnabled(appConfig.agent, "search.tavily") ||
+        !appConfig.agent.tavily_api_key.trim())
     ) {
       return {
-        content: "模型请求调用 Tavily 搜索，但 Tavily Agent 没有配置完整。请到设置页开启 Agent 总开关和 Tavily 联网搜索，填写 Tavily API Key，并确认技能白名单包含 search.tavily。",
+        content: "模型请求调用 Tavily 搜索，但 search.tavily 没有启用或 Tavily API Key 为空。请到设置页打开 Tavily 搜索工具并填写 API Key。",
         tts_text: "(平静)模型请求联网搜索，但 Tavily 还没有配置完整。请到设置页填写密钥并打开对应开关。",
         original_content: rawReply,
       };

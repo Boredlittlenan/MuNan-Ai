@@ -11,10 +11,6 @@ use tokio::time::timeout;
 #[derive(Debug, Serialize)]
 pub struct AgentCapabilityPreview {
     pub enabled: bool,
-    pub browser_enabled: bool,
-    pub system_enabled: bool,
-    pub shell_enabled: bool,
-    pub tavily_enabled: bool,
     pub tavily_max_results: u32,
     pub require_confirmation: bool,
     pub max_steps: u32,
@@ -258,28 +254,19 @@ query 要简短具体，保留关键实体、时间和限定词。"
 
 #[tauri::command]
 pub fn preview_agent_capabilities(agent: AgentConfig) -> AgentCapabilityPreview {
-    let active_skills = agent
-        .enabled_skills
-        .iter()
-        .filter(|skill| {
-            agent.enabled
-                && ((agent.browser_enabled && skill.starts_with("browser."))
-                    || (agent.system_enabled
-                        && skill.starts_with("system.")
-                        && skill.as_str() != "system.shell")
-                    || (agent.shell_enabled && skill.as_str() == "system.shell")
-                    || (agent.tavily_enabled && skill.as_str() == "search.tavily"))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
+    let active_skills = if agent.enabled {
+        agent.enabled_skills.clone()
+    } else {
+        Vec::new()
+    };
 
     let message = if !agent.enabled {
         "Agent 总开关未开启，所有技能都会保持待命。".to_string()
     } else if active_skills.is_empty() {
-        "Agent 已开启，但当前没有可执行技能。请至少开启浏览器或系统操作。".to_string()
+        "Agent 已开启，但当前没有可用工具。请至少打开一个工具。".to_string()
     } else {
         format!(
-            "Agent 已开启，当前可用 {} 个技能；单次任务最多执行 {} 步。",
+            "Agent 已开启，当前可用 {} 个工具；单次任务最多执行 {} 步。",
             active_skills.len(),
             agent.max_steps
         )
@@ -287,10 +274,6 @@ pub fn preview_agent_capabilities(agent: AgentConfig) -> AgentCapabilityPreview 
 
     AgentCapabilityPreview {
         enabled: agent.enabled,
-        browser_enabled: agent.browser_enabled,
-        system_enabled: agent.system_enabled,
-        shell_enabled: agent.shell_enabled,
-        tavily_enabled: agent.tavily_enabled,
         tavily_max_results: normalize_tavily_max_results(agent.tavily_max_results),
         require_confirmation: agent.require_confirmation,
         max_steps: agent.max_steps,
@@ -312,17 +295,8 @@ pub async fn agent_tavily_search(
         return Err("Tavily 搜索关键词不能为空。".into());
     }
 
-    if !config.agent.enabled || !config.agent.tavily_enabled {
+    if !config.agent.enabled || !agent_skill_enabled(&config.agent, "search.tavily") {
         return Err("Tavily Agent 搜索尚未开启。".into());
-    }
-
-    if !config
-        .agent
-        .enabled_skills
-        .iter()
-        .any(|skill| skill == "search.tavily")
-    {
-        return Err("Tavily 搜索技能未加入白名单。".into());
     }
 
     let api_key = config.agent.tavily_api_key.trim();
@@ -619,6 +593,10 @@ fn parse_tavily_plan(raw: &str) -> Result<AgentTavilyPlan, String> {
 
 fn normalize_tavily_max_results(value: u32) -> u32 {
     value.clamp(1, 10)
+}
+
+fn agent_skill_enabled(agent: &AgentConfig, skill_id: &str) -> bool {
+    agent.enabled_skills.iter().any(|skill| skill == skill_id)
 }
 
 fn extract_json_object(raw: &str) -> Option<String> {

@@ -580,39 +580,6 @@
 }
 
 @media (max-width: 1100px) {
-  .chat-layout {
-    grid-template-columns: 1fr;
-    height: auto;
-    min-height: 0;
-  }
-
-  .chat-main {
-    min-height: 540px;
-  }
-
-  .chat-sidebar {
-    max-height: none;
-  }
-
-  .chat-sidebar .sidebar-section:last-child {
-    flex: none;
-    overflow: visible;
-  }
-
-  .conversation-list {
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding: 0 0 6px;
-  }
-
-  .conversation-card {
-    width: min(260px, 48vw);
-    min-width: 220px;
-  }
-}
-
-@media (max-width: 720px) {
   .chat-page {
     display: flex;
     flex-direction: column;
@@ -724,6 +691,12 @@
   .chat-sidebar__mobile-header .icon-action {
     width: 42px;
     min-width: 42px;
+    max-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    padding: 0;
+    border-radius: 999px;
+    flex: 0 0 42px;
   }
 
   .chat-sidebar .sidebar-section:last-child {
@@ -779,21 +752,6 @@
     display: none;
   }
 
-  .input-area {
-    grid-template-columns: 48px 48px minmax(0, 1fr);
-  }
-
-  .input-box {
-    grid-column: 1 / -1;
-    min-height: 82px;
-  }
-
-  .image-attach-button,
-  .record-button,
-  .send-button {
-    width: 100%;
-    min-height: 42px;
-  }
 }
 
 @media (max-width: 560px) {
@@ -857,6 +815,22 @@
 
   .input-caption {
     font-size: 11px;
+  }
+
+  .input-area {
+    grid-template-columns: 48px 48px minmax(0, 1fr);
+  }
+
+  .input-box {
+    grid-column: 1 / -1;
+    min-height: 82px;
+  }
+
+  .image-attach-button,
+  .record-button,
+  .send-button {
+    width: 100%;
+    min-height: 42px;
   }
 }
 

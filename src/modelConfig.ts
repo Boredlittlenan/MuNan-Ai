@@ -106,10 +106,6 @@ export type AgentSkill = {
 
 export type AgentConfig = {
   enabled: boolean;
-  browser_enabled: boolean;
-  system_enabled: boolean;
-  shell_enabled: boolean;
-  tavily_enabled: boolean;
   tavily_api_key: string;
   tavily_max_results: number;
   require_confirmation: boolean;
@@ -290,10 +286,6 @@ export const createEmptyAppConfig = (): AppConfig => ({
   },
   agent: {
     enabled: false,
-    browser_enabled: false,
-    system_enabled: false,
-    shell_enabled: false,
-    tavily_enabled: false,
     tavily_api_key: "",
     tavily_max_results: 5,
     require_confirmation: true,
@@ -463,10 +455,6 @@ export const normalizeAppConfig = (
   };
   fallback.agent = {
     enabled: value?.agent?.enabled ?? fallback.agent.enabled,
-    browser_enabled: value?.agent?.browser_enabled ?? fallback.agent.browser_enabled,
-    system_enabled: value?.agent?.system_enabled ?? fallback.agent.system_enabled,
-    shell_enabled: value?.agent?.shell_enabled ?? fallback.agent.shell_enabled,
-    tavily_enabled: value?.agent?.tavily_enabled ?? fallback.agent.tavily_enabled,
     tavily_api_key: value?.agent?.tavily_api_key ?? fallback.agent.tavily_api_key,
     tavily_max_results: normalizeTavilyMaxResults(
       value?.agent?.tavily_max_results ?? fallback.agent.tavily_max_results
@@ -510,9 +498,11 @@ export const normalizeAgentSkills = (value: string[] | undefined): string[] => {
   }
 
   const allowed = new Set(AGENT_SKILLS.map((skill) => skill.id));
-  const normalized = Array.from(new Set(value.filter((item) => allowed.has(item))));
+  return Array.from(new Set(value.filter((item) => allowed.has(item))));
+};
 
-  return normalized.length > 0 ? normalized : DEFAULT_AGENT_SKILLS;
+export const isAgentSkillEnabled = (agent: AgentConfig, skillId: string): boolean => {
+  return agent.enabled && agent.enabled_skills.includes(skillId);
 };
 
 export const normalizeAgentMaxSteps = (value: number): number => {

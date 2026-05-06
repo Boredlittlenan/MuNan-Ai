@@ -170,14 +170,6 @@ pub struct AgentConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
-    pub browser_enabled: bool,
-    #[serde(default)]
-    pub system_enabled: bool,
-    #[serde(default)]
-    pub shell_enabled: bool,
-    #[serde(default)]
-    pub tavily_enabled: bool,
-    #[serde(default)]
     pub tavily_api_key: String,
     #[serde(default = "default_tavily_max_results")]
     pub tavily_max_results: u32,
@@ -193,10 +185,6 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            browser_enabled: false,
-            system_enabled: false,
-            shell_enabled: false,
-            tavily_enabled: false,
             tavily_api_key: String::new(),
             tavily_max_results: default_tavily_max_results(),
             require_confirmation: default_agent_require_confirmation(),

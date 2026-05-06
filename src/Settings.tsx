@@ -5,21 +5,21 @@ import { useNavigate } from "react-router-dom";
 import {
   IoArrowBack,
   IoAnalyticsOutline,
-  IoBrowsersOutline,
   IoCheckmarkCircle,
+  IoClose,
   IoCloudUploadOutline,
   IoCubeOutline,
   IoDownloadOutline,
   IoEyeOffOutline,
   IoEyeOutline,
   IoInformationCircleOutline,
+  IoMenu,
   IoMicOutline,
   IoPersonOutline,
   IoRefresh,
   IoSave,
   IoShieldCheckmarkOutline,
   IoSparklesOutline,
-  IoTerminalOutline,
 } from "react-icons/io5";
 
 import "./styles/base.css";
@@ -94,10 +94,6 @@ type TokenUsageStats = {
 
 type AgentCapabilityPreview = {
   enabled: boolean;
-  browser_enabled: boolean;
-  system_enabled: boolean;
-  shell_enabled: boolean;
-  tavily_enabled: boolean;
   tavily_max_results: number;
   require_confirmation: boolean;
   max_steps: number;
@@ -116,7 +112,7 @@ const SETTINGS_SECTIONS: Array<{
   { id: "model", title: "模型配置", meta: "供应商、密钥与模型名称", icon: IoCubeOutline },
   { id: "speech", title: "ASR / TTS 配置", meta: "语音识别与语音合成", icon: IoMicOutline },
   { id: "usage", title: "用量统计", meta: "Token 消耗、趋势图与模型占比", icon: IoAnalyticsOutline },
-  { id: "agent", title: "Agent 设置", meta: "系统操作、浏览器操作与技能开关", icon: IoSparklesOutline },
+  { id: "agent", title: "Agent 设置", meta: "工具开关、搜索参数与执行限制", icon: IoSparklesOutline },
 ];
 
 /* =========================
@@ -129,6 +125,7 @@ const SETTINGS_SECTIONS: Array<{
 function Settings() {
   const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState<SettingsSection>("user");
+  const [settingsSidebarOpen, setSettingsSidebarOpen] = useState(false);
 
   /**
    * selectedModel 表示“当前正在编辑哪个模型”。
@@ -369,12 +366,6 @@ function Settings() {
       agent: {
         ...previous.agent,
         [field]: value,
-        enabled_skills:
-          field === "shell_enabled" && value === true
-            ? Array.from(new Set([...previous.agent.enabled_skills, "system.shell"]))
-            : field === "tavily_enabled" && value === true
-              ? Array.from(new Set([...previous.agent.enabled_skills, "search.tavily"]))
-              : previous.agent.enabled_skills,
       },
     }));
   };
@@ -724,6 +715,14 @@ function Settings() {
             <IoArrowBack size={18} />
             返回聊天
           </button>
+          <button
+            type="button"
+            className="icon-action settings-sidebar-toggle"
+            onClick={() => setSettingsSidebarOpen(true)}
+            aria-label="打开设置分类"
+          >
+            <IoMenu size={20} />
+          </button>
         </div>
 
         <div className="settings-header__actions">
@@ -785,8 +784,26 @@ function Settings() {
       )}
 
       <div className="settings-layout">
+        <button
+          type="button"
+          className={`settings-sidebar-backdrop ${settingsSidebarOpen ? "is-open" : ""}`}
+          onClick={() => setSettingsSidebarOpen(false)}
+          aria-label="关闭设置分类"
+        />
+
         {/* 左栏只负责设置分类导航，具体配置放到右侧内容区。 */}
-        <aside className="settings-sidebar glass-panel">
+        <aside className={`settings-sidebar glass-panel ${settingsSidebarOpen ? "is-open" : ""}`}>
+          <div className="settings-sidebar__mobile-header">
+            <button
+              type="button"
+              className="icon-action"
+              onClick={() => setSettingsSidebarOpen(false)}
+              aria-label="关闭设置分类"
+            >
+              <IoClose size={20} />
+            </button>
+          </div>
+
           <div className="section-heading">
             <div>
               <p className="section-kicker">Settings</p>
@@ -809,6 +826,7 @@ function Settings() {
                     setActiveSection(section.id);
                     setMessage("");
                     setError("");
+                    setSettingsSidebarOpen(false);
                   }}
                 >
                   <span className="settings-category-card__icon" aria-hidden="true">
@@ -1219,104 +1237,73 @@ function Settings() {
                       </label>
                     </div>
                     <p className="settings-help-text">
-                      先作为实验能力管理入口。开启后，后续 Agent 工作台会按这里的权限和技能白名单运行。
-                    </p>
-                  </div>
-
-                  <div className="settings-field">
-                    <div className="settings-field__header">
-                      <div className="agent-setting-title">
-                        <IoBrowsersOutline size={20} />
-                        <div>
-                          <p className="section-kicker">Browser</p>
-                          <h3>浏览器操作</h3>
-                        </div>
-                      </div>
-                      <label className="settings-switch">
-                        <input
-                          type="checkbox"
-                          checked={config.agent.browser_enabled}
-                          onChange={(event) =>
-                            updateAgentField("browser_enabled", event.target.checked)
-                          }
-                        />
-                        <span />
-                      </label>
-                    </div>
-                    <p className="settings-help-text">
-                      允许 Agent 使用独立浏览器执行打开网页、读取文本和截图观察等动作。
-                    </p>
-                  </div>
-
-                  <div className="settings-field">
-                    <div className="settings-field__header">
-                      <div className="agent-setting-title">
-                        <IoTerminalOutline size={20} />
-                        <div>
-                          <p className="section-kicker">System</p>
-                          <h3>系统操作</h3>
-                        </div>
-                      </div>
-                      <label className="settings-switch">
-                        <input
-                          type="checkbox"
-                          checked={config.agent.system_enabled}
-                          onChange={(event) =>
-                            updateAgentField("system_enabled", event.target.checked)
-                          }
-                        />
-                        <span />
-                      </label>
-                    </div>
-                    <p className="settings-help-text">
-                      允许 Agent 使用低风险系统工具，例如打开指定路径或写入剪贴板。
-                    </p>
-                  </div>
-
-                  <div className="settings-field">
-                    <div className="settings-field__header">
-                      <div className="agent-setting-title">
-                        <IoTerminalOutline size={20} />
-                        <div>
-                          <p className="section-kicker">Shell</p>
-                          <h3>Shell 执行</h3>
-                        </div>
-                      </div>
-                      <label className="settings-switch">
-                        <input
-                          type="checkbox"
-                          checked={config.agent.shell_enabled}
-                          onChange={(event) =>
-                            updateAgentField("shell_enabled", event.target.checked)
-                          }
-                        />
-                        <span />
-                      </label>
-                    </div>
-                    <p className="settings-help-text">
-                      允许 AI 根据对话需求自动规划并调用本地 Shell；显式输入“执行命令 ...”仍可作为快捷方式。
+                      总开关决定 Agent 是否允许调用工具；具体能调用什么，由下方工具开关决定。
                     </p>
                   </div>
 
                   <div className="settings-field settings-field--wide">
                     <div className="settings-field__header">
-                      <div className="agent-setting-title">
-                        <IoBrowsersOutline size={20} />
-                        <div>
-                          <p className="section-kicker">Tavily</p>
-                          <h3>Tavily 联网搜索</h3>
-                        </div>
+                      <div>
+                        <p className="section-kicker">Tools</p>
+                        <h3>可用工具</h3>
                       </div>
-                      <label className="settings-switch">
-                        <input
-                          type="checkbox"
-                          checked={config.agent.tavily_enabled}
-                          onChange={(event) =>
-                            updateAgentField("tavily_enabled", event.target.checked)
-                          }
-                        />
-                        <span />
-                      </label>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => void previewAgentCapabilities()}
+                      >
+                        检查配置
+                      </button>
+                    </div>
+
+                    <div className="agent-skill-grid">
+                      {AGENT_SKILLS.map((skill) => {
+                        const enabled = config.agent.enabled_skills.includes(skill.id);
+
+                        return (
+                          <label
+                            key={skill.id}
+                            className={`agent-skill-card ${enabled ? "is-enabled" : ""}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={enabled}
+                              onChange={() => toggleAgentSkill(skill.id)}
+                            />
+                            <span className="agent-skill-card__body">
+                              <span className="agent-skill-card__header">
+                                <span>{skill.label}</span>
+                                <code>{skill.id}</code>
+                              </span>
+                              <span className="settings-help-text">{skill.description}</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    {agentPreview && (
+                      <div className="agent-preview-card">
+                        <strong>{agentPreview.message}</strong>
+                        <span>
+                          当前可执行工具：
+                          {agentPreview.active_skills.length > 0
+                            ? agentPreview.active_skills.join("、")
+                            : "暂无"}
+                        </span>
+                      </div>
+                    )}
+                    {agentPreviewError && (
+                      <p className="settings-help-text settings-help-text--danger">
+                        {agentPreviewError}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="settings-field settings-field--wide">
+                    <div>
+                      <p className="section-kicker">Tavily</p>
+                      <h3>Tavily 参数</h3>
                     </div>
 
                     <div className="webdav-settings-grid">
@@ -1368,7 +1355,7 @@ function Settings() {
                     </div>
 
                     <p className="settings-help-text">
-                      开启后，AI 可以在需要最新信息、网页资料或来源核实时调用 Tavily Search。
+                      只有打开 search.tavily 工具后，这里的 API Key 和最大结果数才会用于联网搜索。
                     </p>
                   </div>
 
@@ -1417,74 +1404,6 @@ function Settings() {
                     </p>
                   </div>
 
-                  <div className="settings-field settings-field--wide">
-                    <div className="settings-field__header">
-                      <div>
-                        <p className="section-kicker">Skills</p>
-                        <h3>技能白名单</h3>
-                      </div>
-                      <button
-                        type="button"
-                        className="ghost-button"
-                        onClick={() => void previewAgentCapabilities()}
-                      >
-                        检查配置
-                      </button>
-                    </div>
-
-                    <div className="agent-skill-grid">
-                      {AGENT_SKILLS.map((skill) => {
-                        const enabled = config.agent.enabled_skills.includes(skill.id);
-                        const categoryEnabled =
-                          skill.id === "system.shell"
-                            ? config.agent.shell_enabled
-                            : skill.id === "search.tavily"
-                              ? config.agent.tavily_enabled
-                              : skill.category === "browser"
-                                ? config.agent.browser_enabled
-                                : config.agent.system_enabled;
-
-                        return (
-                          <label
-                            key={skill.id}
-                            className={`agent-skill-card ${enabled ? "is-enabled" : ""} ${
-                              categoryEnabled ? "" : "is-category-disabled"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={enabled}
-                              onChange={() => toggleAgentSkill(skill.id)}
-                            />
-                            <span className="agent-skill-card__body">
-                              <span className="agent-skill-card__header">
-                                <span>{skill.label}</span>
-                                <code>{skill.id}</code>
-                              </span>
-                              <span className="settings-help-text">{skill.description}</span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-
-                    {agentPreview && (
-                      <div className="agent-preview-card">
-                        <strong>{agentPreview.message}</strong>
-                        <span>
-                          当前可执行技能：
-                          {agentPreview.active_skills.length > 0
-                            ? agentPreview.active_skills.join("、")
-                            : "暂无"}
-                        </span>
-                      </div>
-                    )}
-                    {agentPreviewError && (
-                      <p className="settings-help-text settings-help-text--danger">
-                        {agentPreviewError}
-                      </p>
-                    )}
-                  </div>
                 </div>
               )}
 
