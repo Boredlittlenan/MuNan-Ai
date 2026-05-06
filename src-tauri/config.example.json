@@ -51,6 +51,7 @@
     }
   },
   "persona": {
+    "enabled": true,
     "username": "",
     "prompt": "你是 MuNan AI，一个温和、清晰、可靠的桌面 AI 助手。你会优先理解用户真实意图，回答时直接、有条理，并在需要时给出可执行步骤。"
   },
@@ -68,6 +69,9 @@
     "browser_enabled": false,
     "system_enabled": false,
     "shell_enabled": false,
+    "tavily_enabled": false,
+    "tavily_api_key": "",
+    "tavily_max_results": 5,
     "require_confirmation": true,
     "max_steps": 8,
     "enabled_skills": [
@@ -75,7 +79,8 @@
       "browser.extract_text",
       "system.open_path",
       "system.copy_text",
-      "system.shell"
+      "system.shell",
+      "search.tavily"
     ]
   },
   "custom_models": {},

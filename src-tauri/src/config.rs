@@ -105,6 +105,8 @@ pub struct TtsConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PersonaConfig {
+    #[serde(default = "default_persona_enabled")]
+    pub enabled: bool,
     #[serde(default)]
     pub username: String,
     #[serde(default = "default_persona_prompt")]
@@ -114,10 +116,15 @@ pub struct PersonaConfig {
 impl Default for PersonaConfig {
     fn default() -> Self {
         Self {
+            enabled: default_persona_enabled(),
             username: String::new(),
             prompt: default_persona_prompt(),
         }
     }
+}
+
+fn default_persona_enabled() -> bool {
+    true
 }
 
 fn default_persona_prompt() -> String {
@@ -168,6 +175,12 @@ pub struct AgentConfig {
     pub system_enabled: bool,
     #[serde(default)]
     pub shell_enabled: bool,
+    #[serde(default)]
+    pub tavily_enabled: bool,
+    #[serde(default)]
+    pub tavily_api_key: String,
+    #[serde(default = "default_tavily_max_results")]
+    pub tavily_max_results: u32,
     #[serde(default = "default_agent_require_confirmation")]
     pub require_confirmation: bool,
     #[serde(default = "default_agent_max_steps")]
@@ -183,6 +196,9 @@ impl Default for AgentConfig {
             browser_enabled: false,
             system_enabled: false,
             shell_enabled: false,
+            tavily_enabled: false,
+            tavily_api_key: String::new(),
+            tavily_max_results: default_tavily_max_results(),
             require_confirmation: default_agent_require_confirmation(),
             max_steps: default_agent_max_steps(),
             enabled_skills: default_agent_enabled_skills(),
@@ -198,6 +214,10 @@ fn default_agent_max_steps() -> u32 {
     8
 }
 
+fn default_tavily_max_results() -> u32 {
+    5
+}
+
 fn default_agent_enabled_skills() -> Vec<String> {
     vec![
         "browser.open".into(),
@@ -205,6 +225,7 @@ fn default_agent_enabled_skills() -> Vec<String> {
         "system.open_path".into(),
         "system.copy_text".into(),
         "system.shell".into(),
+        "search.tavily".into(),
     ]
 }
 

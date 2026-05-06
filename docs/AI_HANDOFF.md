@@ -20,8 +20,8 @@ MuNan AI 是一个基于 Tauri 2 + React + TypeScript + Rust 的桌面端多模�
 - MIMO TTS VoiceDesign：支持 `mimo-v2.5-tts-voicedesign` 的“音色描述”字段。
 - 语音输入：聊天输入框旁有麦克风按钮，录音后调用 ASR 配置识别并回填输入框。ASR 支持 OpenAI-like/MIMO 和腾讯云语音识别两种 provider。
 - 双文本回复：AI 回复会拆成用户可见文本和 TTS 朗读文本，朗读文本可携带风格标签与音频标签。
-- AI 人设：设置页“基础配置”可编辑用户名和后台人设提示词，每次聊天请求都会作为 system message 注入。
-- Agent 设置与快速动作：设置页新增“Agent 设置”，可管理 Agent 总开关、浏览器操作、系统操作、Shell 执行、高风险确认、单次步数和技能白名单；聊天页会先识别 Agent 指令，当前可执行打开网页、读取网页文本、打开本地路径、复制文本，并可由 AI 根据对话需求自动规划 Shell 命令。
+- AI 人设：设置页“基础配置”可编辑用户名和后台人设提示词；人设有独立开关，开启时才作为 system message 注入。
+- Agent 设置与快速动作：设置页新增“Agent 设置”，可管理 Agent 总开关、浏览器操作、系统操作、Shell 执行、Tavily 联网搜索、高风险确认、单次步数和技能白名单；聊天页会先识别 Agent 指令，当前可执行打开网页、读取网页文本、打开本地路径、复制文本，并可由 AI 根据对话需求自动规划 Shell 命令或 Tavily 搜索。
 - 响应式布局：聊天页和设置页已适配 PC、平板和手机。手机端聊天页使用可折叠模型/会话侧边栏，消息区独立滚动，输入区固定在底部。
 
 ## 2. 技术栈
@@ -104,11 +104,11 @@ src/
 - `CustomProviderConfig`：用户手动添加的模型供应商，字段为 `id`、`label`、`provider`、`base_url`、`api_key`、`model`、`is_multimodal`、`custom_models`。
 - `AsrConfig`：ASR 配置，包含 `provider`、通用 ASR 字段、腾讯云凭据字段、`region`、`tencent_engine_type`。
 - `TtsConfig`：TTS 配置，继承 `ModelConfig`，额外有 `voice`、`voice_description`。
-- `PersonaConfig`：AI 人设配置，字段为 `username`、`prompt`。
+- `PersonaConfig`：AI 人设配置，字段为 `enabled`、`username`、`prompt`。
 - `WebDavConfig`：WebDAV 备份配置，字段为 `url`、`username`、`password`、`path`。
 - `UsageConfig`：Token 用量统计配置，目前包含 `detail_retention_days`，默认 0，表示永久保存明细。
-- `AgentConfig`：Agent 能力配置，包含 `enabled`、`browser_enabled`、`system_enabled`、`shell_enabled`、`require_confirmation`、`max_steps` 和 `enabled_skills`。
-- `AGENT_SKILLS`：前端技能白名单元数据，第一版包含浏览器打开网页、读取页面文本、打开本地路径、复制文本和由 AI 规划的 Shell 执行。
+- `AgentConfig`：Agent 能力配置，包含 `enabled`、`browser_enabled`、`system_enabled`、`shell_enabled`、`tavily_enabled`、`tavily_api_key`、`tavily_max_results`、`require_confirmation`、`max_steps` 和 `enabled_skills`。
+- `AGENT_SKILLS`：前端技能白名单元数据，包含浏览器打开网页、读取页面文本、打开本地路径、复制文本、由 AI 规划的 Shell 执行和 Tavily 搜索。
 - `SpeechConfig`：ASR/TTS 配置组合。
 - `AppConfig`：整份应用配置结构。
 - `createEmptyAppConfig()`：生成完整空配置。
@@ -189,7 +189,7 @@ App.tsx sendMessage()
   -> 如果当前模型开启 is_multimodal，把图片附件转为 image_url content part
   -> Tauri invoke("chat_with_ai")
   -> Rust commands/chat.rs
-  -> 读取 persona.username / persona.prompt
+  -> 读取 persona.username / persona.enabled / persona.prompt
   -> 注入 prompts/chat_response_guide.md
   -> 调用对应 AI provider
   -> 解析 <display_text> 与 <tts_text>
@@ -203,10 +203,10 @@ App.tsx sendMessage()
 
 - 进入页面时读取 `load_app_config`。
 - 左侧展示五类设置入口：基础配置、模型配置、ASR/TTS 配置、用量统计、Agent 设置；左栏桌面端固定自身高度，不随右侧内容切换伸缩。
-- 基础配置中维护 `persona.username`、`persona.prompt`、默认模型和 WebDAV 配置。
+- 基础配置中维护 `persona.username`、`persona.enabled`、`persona.prompt`、默认模型和 WebDAV 配置。
 - 用量统计独立为设置分类，展示筛选范围、今日、本月、明细数量、线性趋势图、每日柱形图和各模型占比饼图。
 - 用量统计页可设置明细保存时间，0 表示永久保存，7-3650 表示自动清理更早明细。
-- Agent 设置页可配置 Agent 总开关、浏览器/系统/Shell 能力开关、高风险确认策略、单次任务步数和技能白名单，并通过 `preview_agent_capabilities` 检查当前表单会启用哪些技能。
+- Agent 设置页可配置 Agent 总开关、浏览器/系统/Shell/Tavily 能力开关、Tavily API Key、Tavily 最大结果数、高风险确认策略、单次任务步数和技能白名单，并通过 `preview_agent_capabilities` 检查当前表单会启用哪些技能。
 - 可在模型导航中添加自定义供应商，自定义供应商按 OpenAI-compatible 接口调用。
 - 编辑当前供应商的 `base_url`、`api_key`、`model`、`is_multimodal`。
 - 维护自定义模型列表。
@@ -217,7 +217,7 @@ App.tsx sendMessage()
 - 从 JSON 备份文件或 WebDAV 导入配置到表单，确认后再点击“保存设置”写入配置文件。
 - WebDAV 地址、用户名、密码和备份文件路径在“基础配置”中维护。
 - 编辑 ASR/TTS 配置。
-- 编辑用户名和 AI 人设提示词，分别保存到 `persona.username` 与 `persona.prompt`。
+- 编辑用户名、AI 人设开关和人设提示词，分别保存到 `persona.username`、`persona.enabled` 与 `persona.prompt`。
 
 ASR 设置：
 
@@ -316,7 +316,7 @@ OpenAI-like/MIMO：
 
 - 读取 `AppConfig`。
 - 将 `persona.username` 作为用户信息 system message 注入。
-- 将 `persona.prompt` 作为人设 system message 注入。
+- `persona.enabled` 开启时，将 `persona.prompt` 作为人设 system message 注入。
 - 将 `src-tauri/prompts/chat_response_guide.md` 作为双文本回复格式引导注入。
 - 按模型供应商分发到 `src-tauri/src/ai/*`。
 - 未命中内置供应商时，会在 `custom_providers` 中查找同名 `id`，并使用 `openai_like::chat_api` 调用。
@@ -377,6 +377,7 @@ ASR 配置示例：
     }
   },
   "persona": {
+    "enabled": true,
     "username": "木南",
     "prompt": "你是 MuNan AI，一个温和、清晰、可靠的桌面 AI 助手。"
   },
@@ -394,6 +395,9 @@ ASR 配置示例：
     "browser_enabled": false,
     "system_enabled": false,
     "shell_enabled": false,
+    "tavily_enabled": false,
+    "tavily_api_key": "",
+    "tavily_max_results": 5,
     "require_confirmation": true,
     "max_steps": 8,
     "enabled_skills": [
@@ -401,7 +405,8 @@ ASR 配置示例：
       "browser.extract_text",
       "system.open_path",
       "system.copy_text",
-      "system.shell"
+      "system.shell",
+      "search.tavily"
     ]
   }
 }
@@ -432,11 +437,14 @@ ASR 配置示例：
 - 腾讯云 ASR 不使用 `speech.asr.base_url`、`speech.asr.api_key`、`speech.asr.model`，避免和 OpenAI-like/MIMO 配置互相覆盖。
 - `speech.tts.voice_description`：VoiceDesign 音色描述。
 - `persona.username`：基础配置中的用户名，每次聊天请求会作为用户信息注入。
-- `persona.prompt`：后台 AI 人设提示词，每次聊天请求都会注入。
+- `persona.enabled`：后台 AI 人设开关，默认开启；关闭后保留提示词但不会注入聊天请求。
+- `persona.prompt`：后台 AI 人设提示词，仅在 `persona.enabled` 开启时注入。
 - `webdav`：WebDAV 备份配置，仅保存在本机配置中；本地导出和 WebDAV 导出的备份 JSON 都会移除该字段。
 - `usage.detail_retention_days`：Token 用量明细保存天数，默认 0，即永久保存；填写 7-3650 时会按天数清理明细；日汇总长期保留。
 - `agent.enabled`：Agent 总开关，默认关闭。
-- `agent.browser_enabled` / `agent.system_enabled` / `agent.shell_enabled`：分别控制浏览器操作、低风险系统操作和 Shell 执行入口，默认关闭。
+- `agent.browser_enabled` / `agent.system_enabled` / `agent.shell_enabled` / `agent.tavily_enabled`：分别控制浏览器操作、低风险系统操作、Shell 执行入口和 Tavily 联网搜索入口，默认关闭。
+- `agent.tavily_api_key`：Tavily Search API Key，仅在 `agent.tavily_enabled` 开启且技能白名单包含 `search.tavily` 时使用。
+- `agent.tavily_max_results`：Tavily 最大返回结果数，前后端限制 1-10，默认 5。
 - `agent.require_confirmation`：高风险操作确认开关，默认开启；真实工具接入后应始终优先遵守。
 - `agent.max_steps`：单次 Agent 任务最多工具调用步数，默认 8，前端限制 1-30。
 - `agent.enabled_skills`：Agent 技能白名单，当前用于配置、预览和聊天页快速动作拦截。
@@ -580,9 +588,9 @@ ASR 配置示例：
 
 - `src/modelConfig.ts` 的 `AgentConfig`、`AGENT_SKILLS`、`normalizeAgentMaxSteps()`。
 - `src/Settings.tsx` 的“Agent 设置”分类。
-- `src/App.tsx` 的 `runAgentQuickAction()`、`runAgentAutoShellAction()`、`parseAgentQuickAction()`、`extractPageTextUrl()`、`extractUrlToOpen()`、`extractPathToOpen()`、`extractCopyText()`、`extractShellCommand()`、`formatShellResult()`、`buildShellToolContext()`。
+- `src/App.tsx` 的 `runAgentQuickAction()`、`runAgentAutoShellAction()`、`runAgentAutoTavilyAction()`、`resolveAgentToolCallReply()`、`parseAgentQuickAction()`、`extractPageTextUrl()`、`extractUrlToOpen()`、`extractPathToOpen()`、`extractCopyText()`、`extractShellCommand()`、`extractShellToolCall()`、`extractTavilyToolCall()`、`stripAgentToolCalls()`、`formatShellResult()`、`buildShellToolContext()`、`buildTavilyToolContext()`。
 - `src-tauri/src/config.rs` 的 `AgentConfig`。
-- `src-tauri/src/commands/agent.rs` 的 `preview_agent_capabilities`、`agent_fetch_url_text`、`agent_plan_shell_action`、`agent_run_shell`。
+- `src-tauri/src/commands/agent.rs` 的 `preview_agent_capabilities`、`agent_fetch_url_text`、`agent_plan_shell_action`、`agent_run_shell`、`agent_plan_tavily_search`、`agent_tavily_search`。
 - `src-tauri/src/lib.rs` 的 command 注册。
 
 后续接入完整工具循环时，建议先做独立浏览器 Profile 的浏览器 Agent，再逐步加入截图观察、点击、填写表单等能力；删除、提交、发送、上传、输入敏感信息、运行命令等操作必须走确认流程。

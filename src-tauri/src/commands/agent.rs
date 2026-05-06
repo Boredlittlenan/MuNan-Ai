@@ -1,7 +1,7 @@
 use crate::ai::types::ChatMessage;
 use crate::config::{load_config, AgentConfig};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -14,6 +14,8 @@ pub struct AgentCapabilityPreview {
     pub browser_enabled: bool,
     pub system_enabled: bool,
     pub shell_enabled: bool,
+    pub tavily_enabled: bool,
+    pub tavily_max_results: u32,
     pub require_confirmation: bool,
     pub max_steps: u32,
     pub enabled_skills: Vec<String>,
@@ -46,6 +48,23 @@ pub struct AgentShellPlan {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct AgentTavilyPlanRequest {
+    pub model: String,
+    pub user_text: String,
+    #[serde(default)]
+    pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AgentTavilyPlan {
+    pub should_search: bool,
+    #[serde(default)]
+    pub query: String,
+    #[serde(default)]
+    pub reason: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct AgentShellRequest {
     pub command: String,
     #[serde(default)]
@@ -60,6 +79,50 @@ pub struct AgentShellResult {
     pub stdout: String,
     pub stderr: String,
     pub timed_out: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentTavilySearchRequest {
+    pub query: String,
+    #[serde(default)]
+    pub max_results: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentTavilySearchResult {
+    pub query: String,
+    pub answer: String,
+    pub results: Vec<AgentTavilySearchItem>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentTavilySearchItem {
+    pub title: String,
+    pub url: String,
+    pub content: String,
+    pub score: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TavilyApiResponse {
+    #[serde(default)]
+    query: String,
+    #[serde(default)]
+    answer: Option<String>,
+    #[serde(default)]
+    results: Vec<TavilyApiResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TavilyApiResult {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    score: Option<f64>,
 }
 
 #[tauri::command]
@@ -130,6 +193,67 @@ pub async fn agent_plan_shell_action(
 }
 
 #[tauri::command]
+pub async fn agent_plan_tavily_search(
+    app: AppHandle,
+    request: AgentTavilyPlanRequest,
+) -> Result<AgentTavilyPlan, String> {
+    let user_text = request.user_text.trim();
+
+    if user_text.is_empty() {
+        return Ok(AgentTavilyPlan {
+            should_search: false,
+            query: String::new(),
+            reason: "用户输入为空。".into(),
+        });
+    }
+
+    let config = load_config(&app)?;
+    let recent_context = compact_agent_context(&request.messages, 12);
+    let planner_messages = vec![
+        ChatMessage::text(
+            "system",
+            "你是 MuNan AI 的 Tavily 联网搜索规划器。你只负责判断用户这次对话是否需要联网搜索，并给出一条适合 Tavily Search API 的搜索 query。\n\
+输出必须是纯 JSON，不能有 Markdown，格式：{\"should_search\":true|false,\"query\":\"...\",\"reason\":\"...\"}。\n\
+当用户需要最新信息、实时资料、新闻、价格、版本、政策、网站资料、外部事实核验、网络搜索或引用来源时，should_search=true。\n\
+当用户只是闲聊、写作、改代码、本地项目排错、普通常识或不需要外部实时信息时，should_search=false。\n\
+query 要简短具体，保留关键实体、时间和限定词。"
+                .to_string(),
+        ),
+        ChatMessage::text(
+            "user",
+            format!(
+                "最近对话：\n{}\n\n用户最新需求：\n{}\n\n请判断是否需要 Tavily 搜索，并返回 JSON。",
+                recent_context, user_text
+            ),
+        ),
+    ];
+
+    let reply = match request.model.as_str() {
+        "openai" => crate::ai::openai::call_openai(planner_messages, config.openai).await?,
+        "deepseek" => crate::ai::deepseek::call_deepseek(planner_messages, config.deepseek).await?,
+        "qwen" => crate::ai::qwen::call_qwen(planner_messages, config.qwen).await?,
+        "mimo" => crate::ai::mimo::call_mimo(planner_messages, config.mimo).await?,
+        "nvidia" => crate::ai::nvidia::call_nvidia(planner_messages, config.nvidia).await?,
+        _ => {
+            let provider = config
+                .custom_providers
+                .into_iter()
+                .find(|provider| provider.id == request.model)
+                .ok_or_else(|| format!("未知模型: {}", request.model))?;
+            crate::ai::openai_like::chat_api(
+                &provider.base_url,
+                &provider.api_key,
+                &provider.model,
+                planner_messages,
+            )
+            .await?
+        }
+    };
+
+    parse_tavily_plan(&reply.content)
+}
+
+#[tauri::command]
 pub fn preview_agent_capabilities(agent: AgentConfig) -> AgentCapabilityPreview {
     let active_skills = agent
         .enabled_skills
@@ -140,7 +264,8 @@ pub fn preview_agent_capabilities(agent: AgentConfig) -> AgentCapabilityPreview 
                     || (agent.system_enabled
                         && skill.starts_with("system.")
                         && skill.as_str() != "system.shell")
-                    || (agent.shell_enabled && skill.as_str() == "system.shell"))
+                    || (agent.shell_enabled && skill.as_str() == "system.shell")
+                    || (agent.tavily_enabled && skill.as_str() == "search.tavily"))
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -162,12 +287,103 @@ pub fn preview_agent_capabilities(agent: AgentConfig) -> AgentCapabilityPreview 
         browser_enabled: agent.browser_enabled,
         system_enabled: agent.system_enabled,
         shell_enabled: agent.shell_enabled,
+        tavily_enabled: agent.tavily_enabled,
+        tavily_max_results: normalize_tavily_max_results(agent.tavily_max_results),
         require_confirmation: agent.require_confirmation,
         max_steps: agent.max_steps,
         enabled_skills: agent.enabled_skills,
         active_skills,
         message,
     }
+}
+
+#[tauri::command]
+pub async fn agent_tavily_search(
+    app: AppHandle,
+    request: AgentTavilySearchRequest,
+) -> Result<AgentTavilySearchResult, String> {
+    let config = load_config(&app)?;
+    let query = request.query.trim().to_string();
+
+    if query.is_empty() {
+        return Err("Tavily 搜索关键词不能为空。".into());
+    }
+
+    if !config.agent.enabled || !config.agent.tavily_enabled {
+        return Err("Tavily Agent 搜索尚未开启。".into());
+    }
+
+    if !config
+        .agent
+        .enabled_skills
+        .iter()
+        .any(|skill| skill == "search.tavily")
+    {
+        return Err("Tavily 搜索技能未加入白名单。".into());
+    }
+
+    let api_key = config.agent.tavily_api_key.trim();
+    if api_key.is_empty() {
+        return Err("请先在 Agent 设置中填写 Tavily API Key。".into());
+    }
+
+    let max_results = normalize_tavily_max_results(
+        request
+            .max_results
+            .unwrap_or(config.agent.tavily_max_results),
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|error| format!("创建 Tavily HTTP 客户端失败: {}", error))?;
+    let response = client
+        .post("https://api.tavily.com/search")
+        .bearer_auth(api_key)
+        .json(&json!({
+            "query": query,
+            "search_depth": "basic",
+            "max_results": max_results,
+            "include_answer": true
+        }))
+        .send()
+        .await
+        .map_err(|error| format!("Tavily 搜索请求失败: {}", error))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("读取 Tavily 响应失败: {}", error))?;
+
+    if !status.is_success() {
+        return Err(format!(
+            "Tavily 搜索失败，HTTP 状态: {}，响应: {}",
+            status, text
+        ));
+    }
+
+    let parsed: TavilyApiResponse = serde_json::from_str(&text)
+        .map_err(|error| format!("Tavily 响应解析失败: {}。原始响应: {}", error, text))?;
+    let items = parsed
+        .results
+        .into_iter()
+        .take(max_results as usize)
+        .map(|item| AgentTavilySearchItem {
+            title: item.title,
+            url: item.url,
+            content: truncate_chars(&item.content, 1_200),
+            score: item.score,
+        })
+        .collect::<Vec<_>>();
+
+    Ok(AgentTavilySearchResult {
+        query: if parsed.query.trim().is_empty() {
+            query
+        } else {
+            parsed.query
+        },
+        answer: parsed.answer.unwrap_or_default(),
+        results: items,
+    })
 }
 
 #[tauri::command]
@@ -380,6 +596,26 @@ fn parse_shell_plan(raw: &str) -> Result<AgentShellPlan, String> {
     }
 
     Ok(plan)
+}
+
+fn parse_tavily_plan(raw: &str) -> Result<AgentTavilyPlan, String> {
+    let json_text = extract_json_object(raw).unwrap_or_else(|| raw.trim().to_string());
+    let mut plan: AgentTavilyPlan = serde_json::from_str(&json_text)
+        .map_err(|error| format!("Agent Tavily 规划解析失败: {}。原始响应: {}", error, raw))?;
+
+    plan.query = plan.query.trim().to_string();
+    plan.reason = plan.reason.trim().to_string();
+
+    if plan.should_search && plan.query.is_empty() {
+        plan.should_search = false;
+        plan.reason = "模型判断需要 Tavily 搜索，但没有给出 query。".into();
+    }
+
+    Ok(plan)
+}
+
+fn normalize_tavily_max_results(value: u32) -> u32 {
+    value.clamp(1, 10)
 }
 
 fn extract_json_object(raw: &str) -> Option<String> {

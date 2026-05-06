@@ -79,6 +79,7 @@ export type SpeechConfig = {
 };
 
 export type PersonaConfig = {
+  enabled: boolean;
   username: string;
   prompt: string;
 };
@@ -94,7 +95,7 @@ export type UsageConfig = {
   detail_retention_days: number;
 };
 
-export type AgentSkillCategory = "browser" | "system";
+export type AgentSkillCategory = "browser" | "system" | "search";
 
 export type AgentSkill = {
   id: string;
@@ -108,6 +109,9 @@ export type AgentConfig = {
   browser_enabled: boolean;
   system_enabled: boolean;
   shell_enabled: boolean;
+  tavily_enabled: boolean;
+  tavily_api_key: string;
+  tavily_max_results: number;
   require_confirmation: boolean;
   max_steps: number;
   enabled_skills: string[];
@@ -223,6 +227,12 @@ export const AGENT_SKILLS: AgentSkill[] = [
     label: "Shell 执行",
     description: "由 AI 根据用户需求规划并执行本地 Shell 命令，返回退出码与输出。",
   },
+  {
+    id: "search.tavily",
+    category: "search",
+    label: "Tavily 搜索",
+    description: "由 AI 根据用户需求调用 Tavily 联网搜索，并把结果作为上下文回答。",
+  },
 ];
 
 const DEFAULT_AGENT_SKILLS = AGENT_SKILLS.map((skill) => skill.id);
@@ -264,6 +274,7 @@ export const createEmptyAppConfig = (): AppConfig => ({
     },
   },
   persona: {
+    enabled: true,
     username: "",
     prompt:
       "你是 MuNan AI，一个温和、清晰、可靠的桌面 AI 助手。你会优先理解用户真实意图，回答时直接、有条理，并在需要时给出可执行步骤。",
@@ -282,6 +293,9 @@ export const createEmptyAppConfig = (): AppConfig => ({
     browser_enabled: false,
     system_enabled: false,
     shell_enabled: false,
+    tavily_enabled: false,
+    tavily_api_key: "",
+    tavily_max_results: 5,
     require_confirmation: true,
     max_steps: 8,
     enabled_skills: DEFAULT_AGENT_SKILLS,
@@ -432,6 +446,7 @@ export const normalizeAppConfig = (
     },
   };
   fallback.persona = {
+    enabled: value?.persona?.enabled ?? fallback.persona.enabled,
     username: value?.persona?.username ?? fallback.persona.username,
     prompt: value?.persona?.prompt ?? fallback.persona.prompt,
   };
@@ -451,6 +466,11 @@ export const normalizeAppConfig = (
     browser_enabled: value?.agent?.browser_enabled ?? fallback.agent.browser_enabled,
     system_enabled: value?.agent?.system_enabled ?? fallback.agent.system_enabled,
     shell_enabled: value?.agent?.shell_enabled ?? fallback.agent.shell_enabled,
+    tavily_enabled: value?.agent?.tavily_enabled ?? fallback.agent.tavily_enabled,
+    tavily_api_key: value?.agent?.tavily_api_key ?? fallback.agent.tavily_api_key,
+    tavily_max_results: normalizeTavilyMaxResults(
+      value?.agent?.tavily_max_results ?? fallback.agent.tavily_max_results
+    ),
     require_confirmation:
       value?.agent?.require_confirmation ?? fallback.agent.require_confirmation,
     max_steps: normalizeAgentMaxSteps(value?.agent?.max_steps ?? fallback.agent.max_steps),
@@ -503,6 +523,16 @@ export const normalizeAgentMaxSteps = (value: number): number => {
   }
 
   return Math.min(Math.max(steps, 1), 30);
+};
+
+export const normalizeTavilyMaxResults = (value: number): number => {
+  const results = Math.round(Number(value));
+
+  if (!Number.isFinite(results)) {
+    return 5;
+  }
+
+  return Math.min(Math.max(results, 1), 10);
 };
 
 export const normalizeRetentionDays = (value: number): number => {

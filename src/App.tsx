@@ -82,6 +82,31 @@ type AgentShellPlan = {
   reason: string;
 };
 
+type AgentShellToolCall = {
+  command: string;
+};
+
+type AgentTavilyPlan = {
+  should_search: boolean;
+  query: string;
+  reason: string;
+};
+
+type AgentTavilySearchResult = {
+  query: string;
+  answer: string;
+  results: Array<{
+    title: string;
+    url: string;
+    content: string;
+    score?: number | null;
+  }>;
+};
+
+type AgentTavilyToolCall = {
+  query: string;
+};
+
 const MAX_IMAGE_ATTACHMENTS = 4;
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
 
@@ -668,6 +693,212 @@ function App() {
     };
   };
 
+  const runAgentAutoTavilyAction = async (
+    text: string,
+    optimisticMessages: Message[],
+    conversationId: string
+  ): Promise<Message | null> => {
+    if (
+      !currentModelReady ||
+      !appConfig.agent.enabled ||
+      !appConfig.agent.tavily_enabled ||
+      !appConfig.agent.tavily_api_key.trim() ||
+      !appConfig.agent.enabled_skills.includes("search.tavily")
+    ) {
+      return null;
+    }
+
+    let plan: AgentTavilyPlan;
+    try {
+      plan = await invoke<AgentTavilyPlan>("agent_plan_tavily_search", {
+        request: {
+          model,
+          userText: text,
+          messages: optimisticMessages.map(toApiMessage),
+        },
+      });
+    } catch (planError) {
+      console.warn("Agent Tavily 规划失败，回退到普通聊天。", planError);
+      return null;
+    }
+
+    if (!plan.should_search || !plan.query.trim()) {
+      return null;
+    }
+
+    let result: AgentTavilySearchResult;
+    try {
+      result = await invoke<AgentTavilySearchResult>("agent_tavily_search", {
+        request: {
+          query: plan.query,
+          maxResults: appConfig.agent.tavily_max_results,
+        },
+      });
+    } catch (searchError) {
+      return {
+        role: "ai",
+        content: `Agent 判断需要 Tavily 搜索，但搜索失败。\n\n搜索词：\`${plan.query}\`\n原因：${plan.reason || "未提供"}\n错误：${String(searchError)}`,
+      };
+    }
+
+    const toolContext = buildTavilyToolContext(plan, result);
+    const reply = await invoke<ChatReplyResponse>("chat_with_ai", {
+      model,
+      messages: [
+        ...optimisticMessages.map(toApiMessage),
+        {
+          role: "user",
+          content: toolContext,
+        },
+      ],
+      conversationId,
+    });
+    const replyImages = extractImageAttachments(reply.content);
+    const replyContent = stripImageMarkdown(reply.content);
+
+    return {
+      role: "ai",
+      content: replyContent || reply.content,
+      tts_text: reply.tts_text,
+      original_content: reply.original_content || reply.content,
+      attachments: replyImages,
+    };
+  };
+
+  const resolveAgentToolCallReply = async (
+    reply: ChatReplyResponse,
+    optimisticMessages: Message[],
+    conversationId: string
+  ): Promise<ChatReplyResponse> => {
+    const rawReply = reply.original_content || reply.content;
+    const shellToolCall = extractShellToolCall(rawReply);
+    const tavilyToolCall = extractTavilyToolCall(rawReply);
+
+    if (!shellToolCall && !tavilyToolCall) {
+      return reply;
+    }
+
+    if (!appConfig.agent.enabled) {
+      return {
+        content: "模型请求调用 Agent 工具，但 Agent 总开关没有开启。请到设置页开启 Agent 总开关后再试。",
+        tts_text: "(平静)模型请求调用工具，但 Agent 总开关还没有开启。请到设置页打开 Agent。",
+        original_content: rawReply,
+      };
+    }
+
+    if (
+      shellToolCall &&
+      (!appConfig.agent.shell_enabled || !appConfig.agent.enabled_skills.includes("system.shell"))
+    ) {
+      return {
+        content: "模型请求执行 Shell 工具，但 Agent 的 Shell 执行能力没有开启。请到设置页开启 Agent 总开关、Shell 执行，并确认技能白名单包含 system.shell。",
+        tts_text: "(平静)模型请求执行本地命令，但 Shell 能力还没有开启。请到设置页打开对应开关。",
+        original_content: rawReply,
+      };
+    }
+
+    if (
+      tavilyToolCall &&
+      (!appConfig.agent.tavily_enabled ||
+        !appConfig.agent.tavily_api_key.trim() ||
+        !appConfig.agent.enabled_skills.includes("search.tavily"))
+    ) {
+      return {
+        content: "模型请求调用 Tavily 搜索，但 Tavily Agent 没有配置完整。请到设置页开启 Agent 总开关和 Tavily 联网搜索，填写 Tavily API Key，并确认技能白名单包含 search.tavily。",
+        tts_text: "(平静)模型请求联网搜索，但 Tavily 还没有配置完整。请到设置页填写密钥并打开对应开关。",
+        original_content: rawReply,
+      };
+    }
+
+    if (shellToolCall) {
+      let result: AgentShellResult;
+      try {
+        result = await invoke<AgentShellResult>("agent_run_shell", {
+          request: {
+            command: shellToolCall.command,
+            cwd: "",
+          },
+        });
+      } catch (shellError) {
+        return {
+          content: `Agent 已识别到 Shell 工具调用，但命令执行失败。\n\n命令：\`${shellToolCall.command}\`\n错误：${String(shellError)}`,
+          tts_text: "(抱歉 平静)我识别到了需要执行命令，但这次命令执行失败了。请查看屏幕上的错误信息。",
+          original_content: rawReply,
+        };
+      }
+
+      const toolContext = buildShellToolContext(
+        {
+          should_run: true,
+          command: shellToolCall.command,
+          reason: "模型在回复中请求 execute_shell 工具调用。",
+        },
+        result
+      );
+
+      return await invoke<ChatReplyResponse>("chat_with_ai", {
+        model,
+        messages: [
+          ...optimisticMessages.map(toApiMessage),
+          {
+            role: "assistant",
+            content: stripAgentToolCalls(rawReply),
+          },
+          {
+            role: "user",
+            content: toolContext,
+          },
+        ],
+        conversationId,
+      });
+    }
+
+    if (tavilyToolCall) {
+      let result: AgentTavilySearchResult;
+      try {
+        result = await invoke<AgentTavilySearchResult>("agent_tavily_search", {
+          request: {
+            query: tavilyToolCall.query,
+            maxResults: appConfig.agent.tavily_max_results,
+          },
+        });
+      } catch (searchError) {
+        return {
+          content: `Agent 已识别到 Tavily 搜索工具调用，但搜索失败。\n\n搜索词：\`${tavilyToolCall.query}\`\n错误：${String(searchError)}`,
+          tts_text: "(抱歉 平静)我识别到了需要联网搜索，但这次搜索失败了。请查看屏幕上的错误信息。",
+          original_content: rawReply,
+        };
+      }
+
+      const toolContext = buildTavilyToolContext(
+        {
+          should_search: true,
+          query: tavilyToolCall.query,
+          reason: "模型在回复中请求 tavily_search 工具调用。",
+        },
+        result
+      );
+
+      return await invoke<ChatReplyResponse>("chat_with_ai", {
+        model,
+        messages: [
+          ...optimisticMessages.map(toApiMessage),
+          {
+            role: "assistant",
+            content: stripAgentToolCalls(rawReply),
+          },
+          {
+            role: "user",
+            content: toolContext,
+          },
+        ],
+        conversationId,
+      });
+    }
+
+    return reply;
+  };
+
   /**
    * 输入发送的核心逻辑：
    * 1. 先把用户消息写进本地 UI，保证页面即时反馈。
@@ -747,6 +978,28 @@ function App() {
         return;
       }
 
+      const tavilyAgentReply = await runAgentAutoTavilyAction(
+        input.trim(),
+        optimisticMessages,
+        activeConversation.id
+      );
+
+      if (tavilyAgentReply) {
+        setConversations((previous) => ({
+          ...previous,
+          [model]: (previous[model] ?? []).map((conversation) =>
+            conversation.id === activeConversation.id
+              ? {
+                  ...conversation,
+                  updated_at: Date.now(),
+                  messages: [...optimisticMessages, tavilyAgentReply],
+                }
+              : conversation
+          ),
+        }));
+        return;
+      }
+
       const autoAgentReply = await runAgentAutoShellAction(
         input.trim(),
         optimisticMessages,
@@ -798,8 +1051,17 @@ function App() {
         messages: apiMessages,
         conversationId: activeConversation.id,
       });
-      const replyImages = extractImageAttachments(reply.content);
-      const replyContent = stripImageMarkdown(reply.content);
+      const replyForToolDetection = {
+        ...reply,
+        original_content: reply.original_content || reply.content,
+      };
+      const finalReply = await resolveAgentToolCallReply(
+        replyForToolDetection,
+        optimisticMessages,
+        activeConversation.id
+      );
+      const replyImages = extractImageAttachments(finalReply.content);
+      const replyContent = stripImageMarkdown(stripAgentToolCalls(finalReply.content));
 
       setConversations((previous) => ({
         ...previous,
@@ -812,9 +1074,9 @@ function App() {
                   ...optimisticMessages,
                   {
                     role: "ai",
-                    content: replyContent || reply.content,
-                    tts_text: reply.tts_text,
-                    original_content: reply.original_content || reply.content,
+                    content: replyContent || stripAgentToolCalls(finalReply.content),
+                    tts_text: finalReply.tts_text,
+                    original_content: finalReply.original_content || finalReply.content,
                     attachments: replyImages,
                   },
                 ],
@@ -1732,6 +1994,92 @@ const extractShellCommand = (text: string): string | null => {
   return null;
 };
 
+const extractShellToolCall = (text: string): AgentShellToolCall | null => {
+  const xmlCommand = text.match(
+    /<tool_call>[\s\S]*?<function\s*=\s*["']?execute_shell["']?\s*>[\s\S]*?<parameter\s*=\s*["']?command["']?\s*>([\s\S]*?)<\/parameter>[\s\S]*?<\/function>[\s\S]*?<\/tool_call>/i
+  );
+  const command = xmlCommand?.[1]?.trim();
+
+  if (command) {
+    return { command: decodeBasicHtmlEntities(command) };
+  }
+
+  const jsonCall = text.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/i);
+  if (!jsonCall) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(jsonCall[1]) as {
+      function?: string;
+      name?: string;
+      arguments?: { command?: string };
+      parameters?: { command?: string };
+      command?: string;
+    };
+    const functionName = parsed.function || parsed.name;
+    const jsonCommand =
+      parsed.command || parsed.arguments?.command || parsed.parameters?.command || "";
+
+    if (functionName === "execute_shell" && jsonCommand.trim()) {
+      return { command: jsonCommand.trim() };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
+const extractTavilyToolCall = (text: string): AgentTavilyToolCall | null => {
+  const xmlQuery = text.match(
+    /<tool_call>[\s\S]*?<function\s*=\s*["']?tavily_search["']?\s*>[\s\S]*?<parameter\s*=\s*["']?query["']?\s*>([\s\S]*?)<\/parameter>[\s\S]*?<\/function>[\s\S]*?<\/tool_call>/i
+  );
+  const query = xmlQuery?.[1]?.trim();
+
+  if (query) {
+    return { query: decodeBasicHtmlEntities(query) };
+  }
+
+  const jsonCall = text.match(/<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/i);
+  if (!jsonCall) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(jsonCall[1]) as {
+      function?: string;
+      name?: string;
+      arguments?: { query?: string };
+      parameters?: { query?: string };
+      query?: string;
+    };
+    const functionName = parsed.function || parsed.name;
+    const jsonQuery = parsed.query || parsed.arguments?.query || parsed.parameters?.query || "";
+
+    if (functionName === "tavily_search" && jsonQuery.trim()) {
+      return { query: jsonQuery.trim() };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
+const stripAgentToolCalls = (text: string): string => {
+  return text.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "").trim();
+};
+
+const decodeBasicHtmlEntities = (text: string): string => {
+  return text
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&");
+};
+
 const formatShellResult = (result: AgentShellResult): string => {
   const exitStatus = result.timed_out ? "已超时" : `退出码 ${result.exit_code ?? "未知"}`;
   const stdout = escapeMarkdownFence(result.stdout.trim() || "(无)");
@@ -1752,6 +2100,23 @@ const buildShellToolContext = (plan: AgentShellPlan, result: AgentShellResult): 
     : "";
 
   return `你刚刚根据用户需求自动调用了本地 Shell。请基于下面的执行结果，直接回答用户刚才的问题，不要编造没有出现在输出里的事实。\n\n规划理由：${plan.reason || "未提供"}\n命令：\`${result.command}\`\n工作目录：\`${result.cwd || "."}\`\n状态：${exitStatus}\n\nstdout:\n\`\`\`\n${stdout}\n\`\`\`${stderrBlock}`;
+};
+
+const buildTavilyToolContext = (
+  plan: AgentTavilyPlan,
+  result: AgentTavilySearchResult
+): string => {
+  const answer = result.answer.trim();
+  const results = result.results.length
+    ? result.results
+        .map(
+          (item, index) =>
+            `${index + 1}. ${item.title || "未命名结果"}\nURL: ${item.url}\n摘要: ${item.content || "(无摘要)"}`
+        )
+        .join("\n\n")
+    : "(没有返回搜索结果)";
+
+  return `你刚刚根据用户需求调用了 Tavily 联网搜索。请基于下面的真实搜索结果回答用户，尽量标注来源链接，不要编造没有出现在搜索结果里的事实。\n\n规划理由：${plan.reason || "未提供"}\n搜索词：${result.query || plan.query}\n\nTavily Answer:\n${answer || "(无)"}\n\n搜索结果:\n${results}`;
 };
 
 const escapeMarkdownFence = (text: string): string => {

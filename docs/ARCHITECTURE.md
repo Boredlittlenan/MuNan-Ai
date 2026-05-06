@@ -7,6 +7,7 @@
 - `src/Settings.tsx`: model configuration UI, including the per-model multimodal toggle.
 - `src/modelConfig.ts`: shared frontend model metadata, storage helpers, and config types.
 - Agent settings live in `src/Settings.tsx` and `src/modelConfig.ts`; they manage feature toggles and a skill allowlist. `src/App.tsx` currently includes quick actions for opening URLs/paths, reading webpage text, copying text, and letting the active AI model plan Shell commands from user intent.
+- AI replies that contain `<tool_call><function=execute_shell>...` or `<function=tavily_search>...` are intercepted by the chat page, executed through Tauri Agent commands, stripped from the visible message, and then fed back into the model for a final user-facing answer.
 - Conversation history loads from Tauri commands and is persisted in backend SQLite, including message image attachment metadata/data and token usage statistics; `localStorage` is only used for lightweight UI state and legacy migration.
 - `src/styles/`: page and shared styles.
 
@@ -26,7 +27,7 @@
 - Runtime config is saved in the OS app data directory as `config.json`.
 - Chat model configs include `is_multimodal`; when enabled, the frontend sends OpenAI-compatible `image_url` content parts.
 - Usage config includes `usage.detail_retention_days`, which controls how long per-request token usage events are kept. `0` means keeping details permanently. Daily aggregates are retained long term and can be queried by date range for charts.
-- Agent config includes `agent.enabled`, browser/system/Shell operation toggles, `require_confirmation`, `max_steps`, and `enabled_skills`. Shell execution is off by default; when enabled, the active AI model first plans whether a Shell command is needed, then the command output is sent back into the normal chat reply flow.
+- Agent config includes `agent.enabled`, browser/system/Shell/Tavily operation toggles, Tavily API Key/result limit, `require_confirmation`, `max_steps`, and `enabled_skills`. Shell and Tavily are off by default; when enabled, the active AI model first plans whether a tool call is needed, then tool output is sent back into the normal chat reply flow.
 - Use `src-tauri/config.example.json` as the committed template.
 - Old `config.local.json` / `config.json` files in the repo are migrated automatically on first load.
 

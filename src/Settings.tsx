@@ -49,6 +49,7 @@ import {
   normalizeAgentMaxSteps,
   loadPreferredModel,
   normalizeRetentionDays,
+  normalizeTavilyMaxResults,
   normalizeAppConfig,
   savePreferredModel,
   updateModelConfig,
@@ -96,6 +97,8 @@ type AgentCapabilityPreview = {
   browser_enabled: boolean;
   system_enabled: boolean;
   shell_enabled: boolean;
+  tavily_enabled: boolean;
+  tavily_max_results: number;
   require_confirmation: boolean;
   max_steps: number;
   enabled_skills: string[];
@@ -310,6 +313,16 @@ function Settings() {
     }));
   };
 
+  const updatePersonaEnabled = (enabled: boolean) => {
+    setConfig((previous) => ({
+      ...previous,
+      persona: {
+        ...previous.persona,
+        enabled,
+      },
+    }));
+  };
+
   const updateUsername = (username: string) => {
     setConfig((previous) => ({
       ...previous,
@@ -359,13 +372,22 @@ function Settings() {
         enabled_skills:
           field === "shell_enabled" && value === true
             ? Array.from(new Set([...previous.agent.enabled_skills, "system.shell"]))
-            : previous.agent.enabled_skills,
+            : field === "tavily_enabled" && value === true
+              ? Array.from(new Set([...previous.agent.enabled_skills, "search.tavily"]))
+              : previous.agent.enabled_skills,
       },
     }));
   };
 
   const updateAgentMaxSteps = (value: string) => {
     updateAgentField("max_steps", value === "" ? 1 : normalizeAgentMaxSteps(Number(value)));
+  };
+
+  const updateTavilyMaxResults = (value: string) => {
+    updateAgentField(
+      "tavily_max_results",
+      value === "" ? 5 : normalizeTavilyMaxResults(Number(value))
+    );
   };
 
   const toggleAgentSkill = (skillId: string) => {
@@ -955,9 +977,19 @@ function Settings() {
                   </div>
 
                   <div className="settings-field settings-field--wide">
-                    <div>
-                      <p className="section-kicker">Persona</p>
-                      <h3>AI 人设</h3>
+                    <div className="settings-field__header">
+                      <div>
+                        <p className="section-kicker">Persona</p>
+                        <h3>AI 人设</h3>
+                      </div>
+                      <label className="settings-switch">
+                        <input
+                          type="checkbox"
+                          checked={config.persona.enabled}
+                          onChange={(event) => updatePersonaEnabled(event.target.checked)}
+                        />
+                        <span />
+                      </label>
                     </div>
 
                     <label htmlFor="persona-prompt">后台人设提示词</label>
@@ -965,11 +997,12 @@ function Settings() {
                       id="persona-prompt"
                       className="settings-input settings-textarea persona-textarea"
                       value={config.persona.prompt}
+                      disabled={!config.persona.enabled}
                       placeholder="例如：你是一个温和、清晰、可靠的桌面 AI 助手，回答直接、有条理。"
                       onChange={(event) => updatePersonaPrompt(event.target.value)}
                     />
                     <p className="settings-help-text">
-                      这段内容会作为 system message 注入每次聊天请求。语气、身份、回答边界都可以在这里手动调整。
+                      开启后，这段内容会作为 system message 注入每次聊天请求。关闭后保留文本但不生效。
                     </p>
                   </div>
                 </div>
@@ -1265,6 +1298,80 @@ function Settings() {
                     </p>
                   </div>
 
+                  <div className="settings-field settings-field--wide">
+                    <div className="settings-field__header">
+                      <div className="agent-setting-title">
+                        <IoBrowsersOutline size={20} />
+                        <div>
+                          <p className="section-kicker">Tavily</p>
+                          <h3>Tavily 联网搜索</h3>
+                        </div>
+                      </div>
+                      <label className="settings-switch">
+                        <input
+                          type="checkbox"
+                          checked={config.agent.tavily_enabled}
+                          onChange={(event) =>
+                            updateAgentField("tavily_enabled", event.target.checked)
+                          }
+                        />
+                        <span />
+                      </label>
+                    </div>
+
+                    <div className="webdav-settings-grid">
+                      <div className="webdav-settings-field">
+                        <label htmlFor="agent-tavily-api-key">API Key</label>
+                        <div className="password-input-row">
+                          <input
+                            id="agent-tavily-api-key"
+                            className="settings-input"
+                            type={passwordInputType("agent-tavily-api-key")}
+                            value={config.agent.tavily_api_key}
+                            placeholder="tvly-..."
+                            onChange={(event) =>
+                              updateAgentField("tavily_api_key", event.target.value)
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="password-toggle-button"
+                            onClick={() => togglePasswordVisibility("agent-tavily-api-key")}
+                            aria-label={
+                              isPasswordVisible("agent-tavily-api-key")
+                                ? "隐藏 Tavily API Key"
+                                : "显示 Tavily API Key"
+                            }
+                            title={isPasswordVisible("agent-tavily-api-key") ? "隐藏" : "显示"}
+                          >
+                            {isPasswordVisible("agent-tavily-api-key") ? (
+                              <IoEyeOffOutline size={17} />
+                            ) : (
+                              <IoEyeOutline size={17} />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="webdav-settings-field">
+                        <label htmlFor="agent-tavily-max-results">最大结果数</label>
+                        <input
+                          id="agent-tavily-max-results"
+                          className="settings-input"
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={config.agent.tavily_max_results}
+                          onChange={(event) => updateTavilyMaxResults(event.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <p className="settings-help-text">
+                      开启后，AI 可以在需要最新信息、网页资料或来源核实时调用 Tavily Search。
+                    </p>
+                  </div>
+
                   <div className="settings-field">
                     <div className="settings-field__header">
                       <div className="agent-setting-title">
@@ -1331,9 +1438,11 @@ function Settings() {
                         const categoryEnabled =
                           skill.id === "system.shell"
                             ? config.agent.shell_enabled
-                            : skill.category === "browser"
-                              ? config.agent.browser_enabled
-                              : config.agent.system_enabled;
+                            : skill.id === "search.tavily"
+                              ? config.agent.tavily_enabled
+                              : skill.category === "browser"
+                                ? config.agent.browser_enabled
+                                : config.agent.system_enabled;
 
                         return (
                           <label

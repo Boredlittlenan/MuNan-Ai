@@ -11,7 +11,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::agent::agent_fetch_url_text,
             commands::agent::agent_plan_shell_action,
+            commands::agent::agent_plan_tavily_search,
             commands::agent::agent_run_shell,
+            commands::agent::agent_tavily_search,
             commands::agent::preview_agent_capabilities,
             commands::chat::chat_with_ai,
             commands::config::export_app_config,

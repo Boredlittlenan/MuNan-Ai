@@ -22,8 +22,12 @@ pub async fn chat_with_ai(
     conversation_id: Option<String>,
 ) -> Result<ChatReply, String> {
     let config = load_config(&app)?;
-    let guided_messages =
-        with_response_guidance(messages, config.persona.username, config.persona.prompt);
+    let guided_messages = with_response_guidance(
+        messages,
+        config.persona.username,
+        config.persona.enabled,
+        config.persona.prompt,
+    );
 
     let (reply, provider, provider_model) = match model.as_str() {
         "openai" => {
@@ -108,6 +112,7 @@ pub async fn chat_with_ai(
 fn with_response_guidance(
     messages: Vec<ChatMessage>,
     username: String,
+    persona_enabled: bool,
     persona_prompt: String,
 ) -> Vec<ChatMessage> {
     let mut guided_messages = Vec::with_capacity(messages.len() + 3);
@@ -124,7 +129,7 @@ fn with_response_guidance(
     }
 
     let trimmed_persona = persona_prompt.trim();
-    if !trimmed_persona.is_empty() {
+    if persona_enabled && !trimmed_persona.is_empty() {
         guided_messages.push(ChatMessage {
             role: "system".into(),
             content: serde_json::Value::String(format!("人设与行为要求：\n{}", trimmed_persona)),
@@ -144,7 +149,9 @@ fn parse_chat_reply(raw: &str) -> ChatReply {
     let display_text = extract_tag(raw, "display_text")
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| raw.trim().to_string());
-    let tts_text = extract_tag(raw, "tts_text").unwrap_or_default();
+    let tts_text = extract_tag(raw, "tts_text")
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| build_tts_fallback(&display_text));
 
     ChatReply {
         content: display_text.trim().to_string(),
@@ -160,4 +167,70 @@ fn extract_tag(raw: &str, tag: &str) -> Option<String> {
     let end = raw[start..].find(&end_tag)? + start;
 
     Some(raw[start..end].trim().to_string())
+}
+
+fn build_tts_fallback(display_text: &str) -> String {
+    let mut output = String::new();
+    let mut in_code_block = false;
+
+    for line in display_text.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("```") {
+            if !in_code_block {
+                push_sentence(&mut output, "这里有一段代码，已经显示在屏幕上。");
+            }
+            in_code_block = !in_code_block;
+            continue;
+        }
+
+        if in_code_block || trimmed.is_empty() {
+            continue;
+        }
+
+        let readable = trimmed
+            .trim_start_matches('#')
+            .trim_start_matches(['-', '*', '>', ' '])
+            .replace("**", "")
+            .replace("__", "")
+            .replace('`', "")
+            .replace("[", "")
+            .replace("]", "")
+            .replace("(", "，")
+            .replace(")", "，");
+
+        if !readable.trim().is_empty() {
+            push_sentence(&mut output, readable.trim());
+        }
+    }
+
+    let compact = output
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+
+    if compact.is_empty() {
+        "(平静)这条回复没有可朗读的正文。".into()
+    } else {
+        format!("(平静 清晰){}", truncate_chars(&compact, 1_500))
+    }
+}
+
+fn push_sentence(output: &mut String, sentence: &str) {
+    if !output.is_empty() {
+        output.push(' ');
+    }
+    output.push_str(sentence);
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let mut output = text.chars().take(max_chars).collect::<String>();
+
+    if text.chars().count() > max_chars {
+        output.push_str("。后续内容请查看屏幕文本。");
+    }
+
+    output
 }
