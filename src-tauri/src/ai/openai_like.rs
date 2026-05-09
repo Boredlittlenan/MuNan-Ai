@@ -1,5 +1,8 @@
 use crate::ai::types::{AiResponse, ChatMessage, TokenUsage};
 use serde_json::json;
+use std::time::Duration;
+
+const CHAT_TIMEOUT_SECS: u64 = 180;
 
 /// 调用 mimo OpenAI、豆包或千问 API
 pub async fn chat_api(
@@ -15,7 +18,10 @@ pub async fn chat_api(
     });
 
     // 创建 HTTP 客户端
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(CHAT_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
     // 发送 POST 请求
     let res = client

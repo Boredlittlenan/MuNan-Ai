@@ -107,7 +107,7 @@ src/
 - `PersonaConfig`：AI 人设配置，字段为 `enabled`、`username`、`prompt`。
 - `WebDavConfig`：WebDAV 备份配置，字段为 `url`、`username`、`password`、`path`。
 - `UsageConfig`：Token 用量统计配置，目前包含 `detail_retention_days`，默认 0，表示永久保存明细。
-- `AgentConfig`：Agent 能力配置，包含 `enabled`、`browser_enabled`、`system_enabled`、`shell_enabled`、`tavily_enabled`、`tavily_api_key`、`tavily_max_results`、`require_confirmation`、`max_steps` 和 `enabled_skills`。
+- `AgentConfig`：Agent 能力配置，包含 `enabled`、`tavily_api_key`、`tavily_max_results`、`require_confirmation`、`max_steps` 和 `enabled_skills`。
 - `AGENT_SKILLS`：前端技能白名单元数据，包含浏览器打开网页、读取页面文本、打开本地路径、复制文本、由 AI 规划的 Shell 执行和 Tavily 搜索。
 - `SpeechConfig`：ASR/TTS 配置组合。
 - `AppConfig`：整份应用配置结构。
@@ -392,10 +392,6 @@ ASR 配置示例：
   },
   "agent": {
     "enabled": false,
-    "browser_enabled": false,
-    "system_enabled": false,
-    "shell_enabled": false,
-    "tavily_enabled": false,
     "tavily_api_key": "",
     "tavily_max_results": 5,
     "require_confirmation": true,
@@ -442,12 +438,11 @@ ASR 配置示例：
 - `webdav`：WebDAV 备份配置，仅保存在本机配置中；本地导出和 WebDAV 导出的备份 JSON 都会移除该字段。
 - `usage.detail_retention_days`：Token 用量明细保存天数，默认 0，即永久保存；填写 7-3650 时会按天数清理明细；日汇总长期保留。
 - `agent.enabled`：Agent 总开关，默认关闭。
-- `agent.browser_enabled` / `agent.system_enabled` / `agent.shell_enabled` / `agent.tavily_enabled`：分别控制浏览器操作、低风险系统操作、Shell 执行入口和 Tavily 联网搜索入口，默认关闭。
-- `agent.tavily_api_key`：Tavily Search API Key，仅在 `agent.tavily_enabled` 开启且技能白名单包含 `search.tavily` 时使用。
+- `agent.enabled_skills`：Agent 技能白名单，决定浏览器操作、系统操作、Shell 执行和 Tavily 联网搜索等具体工具是否可用。
+- `agent.tavily_api_key`：Tavily Search API Key，仅在技能白名单包含 `search.tavily` 时使用。
 - `agent.tavily_max_results`：Tavily 最大返回结果数，前后端限制 1-10，默认 5。
-- `agent.require_confirmation`：高风险操作确认开关，默认开启；真实工具接入后应始终优先遵守。
-- `agent.max_steps`：单次 Agent 任务最多工具调用步数，默认 8，前端限制 1-30。
-- `agent.enabled_skills`：Agent 技能白名单，当前用于配置、预览和聊天页快速动作拦截。
+- `agent.require_confirmation`：高风险操作确认开关，默认开启；Shell 执行会由前端确认并由后端再次校验。
+- `agent.max_steps`：单次 Agent 任务最多工具调用步数，默认 8，前端限制 1-30，并会限制模型回复中的工具调用数量。
 - `custom_models`：设置页添加的自定义模型列表。
 - `custom_providers`：设置页添加的自定义供应商列表，导入/导出会保留该列表。
 - 聊天模型的 `is_multimodal`：开启后前端允许发送图片附件；关闭时图片按钮不可用，纯文本聊天不受影响。该字段存在于内置聊天模型配置和 `custom_providers` 中，不用于 ASR/TTS。

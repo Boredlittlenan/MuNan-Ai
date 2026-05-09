@@ -1,6 +1,9 @@
 use crate::speech::types::{SynthesizeSpeechRequest, SynthesizeSpeechResponse};
 use serde_json::{json, Value};
+use std::time::Duration;
 use tauri::AppHandle;
+
+const TTS_TIMEOUT_SECS: u64 = 120;
 
 #[tauri::command]
 pub async fn synthesize_speech(
@@ -67,7 +70,10 @@ pub async fn synthesize_speech(
         "audio": audio,
     });
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(TTS_TIMEOUT_SECS))
+        .build()
+        .map_err(|error| format!("创建 TTS HTTP 客户端失败: {}", error))?;
     let res = client
         .post(cfg.base_url.trim())
         .header("Content-Type", "application/json")

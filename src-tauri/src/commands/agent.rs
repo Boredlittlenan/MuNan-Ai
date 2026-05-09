@@ -65,6 +65,8 @@ pub struct AgentShellRequest {
     pub command: String,
     #[serde(default)]
     pub cwd: String,
+    #[serde(default)]
+    pub confirmed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -137,6 +139,14 @@ pub async fn agent_plan_shell_action(
     }
 
     let config = load_config(&app)?;
+    if !agent_skill_active(&config.agent, "system.shell") {
+        return Ok(AgentShellPlan {
+            should_run: false,
+            command: String::new(),
+            reason: "Shell Agent 尚未开启。".into(),
+        });
+    }
+
     let current_dir = std::env::current_dir()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| ".".into());
@@ -207,6 +217,22 @@ pub async fn agent_plan_tavily_search(
     }
 
     let config = load_config(&app)?;
+    if !agent_skill_active(&config.agent, "search.tavily") {
+        return Ok(AgentTavilyPlan {
+            should_search: false,
+            query: String::new(),
+            reason: "Tavily Agent 搜索尚未开启。".into(),
+        });
+    }
+
+    if config.agent.tavily_api_key.trim().is_empty() {
+        return Ok(AgentTavilyPlan {
+            should_search: false,
+            query: String::new(),
+            reason: "Tavily API Key 为空。".into(),
+        });
+    }
+
     let recent_context = compact_agent_context(&request.messages, 12);
     let planner_messages = vec![
         ChatMessage::text(
@@ -295,9 +321,7 @@ pub async fn agent_tavily_search(
         return Err("Tavily 搜索关键词不能为空。".into());
     }
 
-    if !config.agent.enabled || !agent_skill_enabled(&config.agent, "search.tavily") {
-        return Err("Tavily Agent 搜索尚未开启。".into());
-    }
+    ensure_agent_skill(&config.agent, "search.tavily", "Tavily Agent 搜索")?;
 
     let api_key = config.agent.tavily_api_key.trim();
     if api_key.is_empty() {
@@ -364,7 +388,10 @@ pub async fn agent_tavily_search(
 }
 
 #[tauri::command]
-pub async fn agent_fetch_url_text(url: String) -> Result<AgentFetchedPage, String> {
+pub async fn agent_fetch_url_text(app: AppHandle, url: String) -> Result<AgentFetchedPage, String> {
+    let config = load_config(&app)?;
+    ensure_agent_skill(&config.agent, "browser.extract_text", "网页文本读取")?;
+
     let parsed_url =
         reqwest::Url::parse(url.trim()).map_err(|error| format!("URL 格式不正确: {}", error))?;
 
@@ -407,7 +434,17 @@ pub async fn agent_fetch_url_text(url: String) -> Result<AgentFetchedPage, Strin
 }
 
 #[tauri::command]
-pub async fn agent_run_shell(request: AgentShellRequest) -> Result<AgentShellResult, String> {
+pub async fn agent_run_shell(
+    app: AppHandle,
+    request: AgentShellRequest,
+) -> Result<AgentShellResult, String> {
+    let config = load_config(&app)?;
+    ensure_agent_skill(&config.agent, "system.shell", "Shell Agent 执行")?;
+
+    if config.agent.require_confirmation && !request.confirmed {
+        return Err("Shell 命令需要用户确认后才能执行。".into());
+    }
+
     let command_text = request.command.trim().to_string();
 
     if command_text.is_empty() {
@@ -597,6 +634,22 @@ fn normalize_tavily_max_results(value: u32) -> u32 {
 
 fn agent_skill_enabled(agent: &AgentConfig, skill_id: &str) -> bool {
     agent.enabled_skills.iter().any(|skill| skill == skill_id)
+}
+
+fn agent_skill_active(agent: &AgentConfig, skill_id: &str) -> bool {
+    agent.enabled && agent_skill_enabled(agent, skill_id)
+}
+
+fn ensure_agent_skill(agent: &AgentConfig, skill_id: &str, label: &str) -> Result<(), String> {
+    if !agent.enabled {
+        return Err(format!("{}失败：Agent 总开关未开启。", label));
+    }
+
+    if !agent_skill_enabled(agent, skill_id) {
+        return Err(format!("{}失败：{} 工具未开启。", label, skill_id));
+    }
+
+    Ok(())
 }
 
 fn extract_json_object(raw: &str) -> Option<String> {

@@ -386,6 +386,14 @@ function App() {
    */
   const currentModelReady = isModelConfigured(appConfig, model);
   const agentQuickActionsReady = appConfig.agent.enabled;
+  const confirmAgentShell = (command: string, reason?: string): boolean => {
+    if (!appConfig.agent.require_confirmation) {
+      return true;
+    }
+
+    const reasonText = reason?.trim() ? `\n\n原因：${reason.trim()}` : "";
+    return window.confirm(`Agent 准备执行 Shell 命令：\n${command}${reasonText}\n\n是否继续？`);
+  };
 
   const switchProviderModel = async (modelName: string) => {
     const nextConfig = updateModelConfig(appConfig, model, { model: modelName });
@@ -606,10 +614,12 @@ function App() {
       };
     }
 
-    if (appConfig.agent.require_confirmation) {
-      const accepted = window.confirm(`Agent 准备执行：${action.confirmText}\n\n是否继续？`);
+    let actionConfirmed = true;
 
-      if (!accepted) {
+    if (appConfig.agent.require_confirmation) {
+      actionConfirmed = window.confirm(`Agent 准备执行：${action.confirmText}\n\n是否继续？`);
+
+      if (!actionConfirmed) {
         return {
           role: "ai",
           content: `已取消：${action.confirmText}`,
@@ -650,6 +660,7 @@ function App() {
           request: {
             command: action.command,
             cwd: action.cwd,
+            confirmed: actionConfirmed,
           },
         });
         const toolContext = buildShellToolContext(
@@ -722,12 +733,21 @@ function App() {
       return null;
     }
 
+    const confirmed = confirmAgentShell(plan.command, plan.reason);
+    if (!confirmed) {
+      return {
+        role: "ai",
+        content: `已取消 Shell 执行。\n\n计划命令：\`${plan.command}\`\n原因：${plan.reason || "未提供"}`,
+      };
+    }
+
     let result: AgentShellResult;
     try {
       result = await invoke<AgentShellResult>("agent_run_shell", {
         request: {
           command: plan.command,
           cwd: "",
+          confirmed,
         },
       });
     } catch (shellError) {
@@ -816,8 +836,10 @@ function App() {
       rawReply,
       isAgentSkillEnabled(appConfig.agent, "system.shell") && isLocalActionRequest(latestUserText)
     );
-    const shellToolCall = toolCalls.find((toolCall) => toolCall.kind === "shell");
-    const tavilyToolCall = toolCalls.find((toolCall) => toolCall.kind === "tavily");
+    const maxToolCalls = Math.min(Math.max(Math.round(appConfig.agent.max_steps || 1), 1), 30);
+    const scheduledToolCalls = toolCalls.slice(0, maxToolCalls);
+    const shellToolCall = scheduledToolCalls.find((toolCall) => toolCall.kind === "shell");
+    const tavilyToolCall = scheduledToolCalls.find((toolCall) => toolCall.kind === "tavily");
 
     if (toolCalls.length === 0) {
       return reply;
@@ -855,14 +877,29 @@ function App() {
     }
 
     const toolContexts: string[] = [];
+    if (toolCalls.length > scheduledToolCalls.length) {
+      toolContexts.push(
+        `模型请求了 ${toolCalls.length} 个 Agent 工具调用；当前单次任务步数上限是 ${maxToolCalls}，只执行前 ${scheduledToolCalls.length} 个。`
+      );
+    }
 
-    for (const [index, toolCall] of toolCalls.entries()) {
+    for (const [index, toolCall] of scheduledToolCalls.entries()) {
       if (toolCall.kind === "shell") {
+        const reason = `模型在回复中请求第 ${index + 1} 个 execute_shell 工具调用。`;
+        const confirmed = confirmAgentShell(toolCall.command, reason);
+        if (!confirmed) {
+          toolContexts.push(
+            `第 ${index + 1} 个 Shell 工具调用已被用户取消。\n命令：\`${toolCall.command}\``
+          );
+          continue;
+        }
+
         try {
           const result = await invoke<AgentShellResult>("agent_run_shell", {
             request: {
               command: toolCall.command,
               cwd: "",
+              confirmed,
             },
           });
           toolContexts.push(
@@ -870,7 +907,7 @@ function App() {
               {
                 should_run: true,
                 command: toolCall.command,
-                reason: `模型在回复中请求第 ${index + 1} 个 execute_shell 工具调用。`,
+                reason,
               },
               result
             )
@@ -910,7 +947,7 @@ function App() {
       optimisticMessages,
       conversationId,
       toolContexts,
-      `你刚刚请求了 ${toolCalls.length} 个 Agent 工具调用，应用已按顺序真实执行。请基于下面所有真实结果回复用户，明确哪些任务完成了，哪些任务受系统限制未完成，不要编造。`,
+      `你刚刚请求了 ${toolCalls.length} 个 Agent 工具调用，应用按当前步数上限处理了 ${scheduledToolCalls.length} 个。请基于下面所有真实结果回复用户，明确哪些任务完成了，哪些任务受系统限制未完成，不要编造。`,
       stripAgentToolCalls(rawReply)
     );
 

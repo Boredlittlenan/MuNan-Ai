@@ -4,9 +4,11 @@ use reqwest::Method;
 use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 use tauri::AppHandle;
 
 const DEFAULT_WEBDAV_BACKUP_PATH: &str = "munan-ai-settings.json";
+const WEBDAV_TIMEOUT_SECS: u64 = 30;
 
 #[tauri::command]
 pub fn load_app_config(app: AppHandle) -> Result<AppConfig, String> {
@@ -39,7 +41,10 @@ pub async fn export_app_config_to_webdav(config: AppConfig) -> Result<(), String
     let webdav = config.webdav.clone();
     let url = webdav_target_url(&webdav.url, &webdav.path)?;
     let content = backup_config_json(&config)?;
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(WEBDAV_TIMEOUT_SECS))
+        .build()
+        .map_err(|error| format!("创建 WebDAV HTTP 客户端失败: {}", error))?;
     let mut request = client
         .request(Method::PUT, url)
         .header("Content-Type", "application/json;charset=utf-8")
@@ -70,7 +75,10 @@ pub async fn export_app_config_to_webdav(config: AppConfig) -> Result<(), String
 pub async fn import_app_config_from_webdav(config: AppConfig) -> Result<AppConfig, String> {
     let webdav = config.webdav.clone();
     let url = webdav_target_url(&webdav.url, &webdav.path)?;
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(WEBDAV_TIMEOUT_SECS))
+        .build()
+        .map_err(|error| format!("创建 WebDAV HTTP 客户端失败: {}", error))?;
     let mut request = client.request(Method::GET, url);
 
     if !webdav.username.trim().is_empty() {

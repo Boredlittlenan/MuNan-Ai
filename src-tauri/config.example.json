@@ -66,10 +66,6 @@
   },
   "agent": {
     "enabled": false,
-    "browser_enabled": false,
-    "system_enabled": false,
-    "shell_enabled": false,
-    "tavily_enabled": false,
     "tavily_api_key": "",
     "tavily_max_results": 5,
     "require_confirmation": true,

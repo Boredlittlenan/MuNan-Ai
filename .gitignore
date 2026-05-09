@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 .codex/
+.vs/
 
 # Local runtime configuration and secrets
 src-tauri/config.json

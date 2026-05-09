@@ -5,6 +5,7 @@ use chrono::Utc;
 use hmac::{Hmac, Mac};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::time::Duration;
 use tauri::AppHandle;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -14,6 +15,7 @@ const TENCENT_ASR_SERVICE: &str = "asr";
 const TENCENT_ASR_ACTION: &str = "SentenceRecognition";
 const TENCENT_ASR_VERSION: &str = "2019-06-14";
 const TENCENT_CONTENT_TYPE: &str = "application/json; charset=utf-8";
+const ASR_TIMEOUT_SECS: u64 = 120;
 
 #[tauri::command]
 pub async fn transcribe_audio(
@@ -87,7 +89,10 @@ async fn transcribe_with_openai_like(
         "max_completion_tokens": 1024,
     });
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(ASR_TIMEOUT_SECS))
+        .build()
+        .map_err(|error| format!("创建 ASR HTTP 客户端失败: {}", error))?;
     let res = client
         .post(base_url)
         .header("Content-Type", "application/json")
@@ -204,7 +209,10 @@ async fn transcribe_with_tencent(
         date: &date,
     })?;
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(ASR_TIMEOUT_SECS))
+        .build()
+        .map_err(|error| format!("创建腾讯云 ASR HTTP 客户端失败: {}", error))?;
     let mut request_builder = client
         .post(url)
         .header("Authorization", authorization)
