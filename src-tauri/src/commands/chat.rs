@@ -172,8 +172,9 @@ fn extract_tag(raw: &str, tag: &str) -> Option<String> {
 fn build_tts_fallback(display_text: &str) -> String {
     let mut output = String::new();
     let mut in_code_block = false;
+    let readable_display_text = strip_tag_blocks(display_text, "ai_card");
 
-    for line in display_text.lines() {
+    for line in readable_display_text.lines() {
         let trimmed = line.trim();
 
         if trimmed.starts_with("```") {
@@ -216,6 +217,28 @@ fn build_tts_fallback(display_text: &str) -> String {
     } else {
         format!("(平静 清晰){}", truncate_chars(&compact, 1_500))
     }
+}
+
+fn strip_tag_blocks(raw: &str, tag: &str) -> String {
+    let start_tag = format!("<{}>", tag);
+    let end_tag = format!("</{}>", tag);
+    let mut output = String::new();
+    let mut remaining = raw;
+
+    while let Some(start) = remaining.find(&start_tag) {
+        output.push_str(&remaining[..start]);
+        let after_start = &remaining[start + start_tag.len()..];
+
+        if let Some(end) = after_start.find(&end_tag) {
+            remaining = &after_start[end + end_tag.len()..];
+        } else {
+            remaining = "";
+            break;
+        }
+    }
+
+    output.push_str(remaining);
+    output
 }
 
 fn push_sentence(output: &mut String, sentence: &str) {
