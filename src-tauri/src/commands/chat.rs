@@ -1,6 +1,7 @@
 use crate::ai::types::{ChatMessage, TokenUsage};
 use crate::config::load_config;
 use crate::storage::{record_token_usage, TokenUsageRecord};
+use chrono::Local;
 use serde::Serialize;
 use tauri::AppHandle;
 
@@ -115,7 +116,7 @@ fn with_response_guidance(
     persona_enabled: bool,
     persona_prompt: String,
 ) -> Vec<ChatMessage> {
-    let mut guided_messages = Vec::with_capacity(messages.len() + 3);
+    let mut guided_messages = Vec::with_capacity(messages.len() + 4);
 
     let trimmed_username = username.trim();
     if !trimmed_username.is_empty() {
@@ -135,6 +136,15 @@ fn with_response_guidance(
             content: serde_json::Value::String(format!("人设与行为要求：\n{}", trimmed_persona)),
         });
     }
+
+    let now = Local::now();
+    guided_messages.push(ChatMessage {
+        role: "system".into(),
+        content: serde_json::Value::String(format!(
+            "当前本地时间：{}。当用户使用今天、明天、下周、今晚、明早等相对时间时，必须按这个时间换算成具体日期和时间。",
+            now.format("%Y-%m-%d %H:%M:%S %:z")
+        )),
+    });
 
     guided_messages.push(ChatMessage {
         role: "system".into(),
@@ -172,7 +182,8 @@ fn extract_tag(raw: &str, tag: &str) -> Option<String> {
 fn build_tts_fallback(display_text: &str) -> String {
     let mut output = String::new();
     let mut in_code_block = false;
-    let readable_display_text = strip_tag_blocks(display_text, "ai_card");
+    let without_cards = strip_tag_blocks(display_text, "ai_card");
+    let readable_display_text = strip_tag_blocks(&without_cards, "scheduled_task");
 
     for line in readable_display_text.lines() {
         let trimmed = line.trim();

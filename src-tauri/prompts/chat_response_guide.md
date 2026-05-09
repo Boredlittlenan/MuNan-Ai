@@ -32,6 +32,20 @@
 .weather-card{font-family:Inter,Arial,sans-serif;border-radius:14px;padding:18px;color:#102033;background:linear-gradient(135deg,#f8fbff,#e8f4ff);border:1px solid #d7e9fb}.temp{font-size:42px;font-weight:800}.weather-card-full header{display:flex;gap:14px;align-items:center}.weather-card-full dl{display:grid;gap:10px;margin:16px 0 0}.weather-card-full div{display:flex;justify-content:space-between;gap:12px}
 </css>
 </ai_card>
+- 如果用户要求在未来某个日期或时间点提醒、闹钟、日程提醒，或让 AI 到点自动执行某件事，可以在 display_text 中输出一个计划任务块，应用会保存并到点触发。不要假装已经提醒完成，只需说明已创建计划任务。
+- scheduled_at 必须使用明确的 ISO 时间，优先带本地时区，例如 2026-05-10T08:00:00+08:00。遇到“今天、明天、下周一”等相对时间，必须结合系统消息里的当前本地时间换算成具体日期。
+- kind 只能写 reminder 或 ai_prompt。reminder 表示到点后只提醒用户；ai_prompt 表示到点后把 prompt 交给 AI 执行，例如天气提醒、日程摘要、联网查询后整理建议。
+- schedule_type 只能写 once 或 recurring。用户要求每天、每周、每月、每年、每隔几天执行时使用 recurring。
+- recurrence 只能写 daily、weekly、monthly、yearly、custom_days。只有 schedule_type 为 recurring 时才需要写 recurrence。
+- 自定义间隔天数使用 recurrence=custom_days，并写 custom_interval_days，例如每 3 天提醒一次。
+
+<scheduled_task>
+<title>明早天气提醒</title>
+<scheduled_at>2026-05-10T08:00:00+08:00</scheduled_at>
+<schedule_type>once</schedule_type>
+<kind>ai_prompt</kind>
+<prompt>到点后查询李沧区天气，并提醒我是否需要带伞和穿什么。</prompt>
+</scheduled_task>
 - 你不能假装已经执行本地命令。如果需要 Shell 能力，可以在 display_text 中输出一个工具调用块，应用会拦截并真实执行：
 - 如果用户一次提出多个可执行任务，可以连续输出多个 tool_call，应用会按顺序执行后再把全部结果发回给你。
 - 对文件夹创建、文件操作、运行命令等请求，应输出真正执行动作的命令，不要只输出查看命令。

@@ -2,6 +2,8 @@
 
 这份文档面向后续接手项目的 AI 或开发者，目标是快速理解软件功能、目录结构、关键文件职责、配置流和常见改动入口。
 
+当前版本：2.0.0
+
 ## 1. 软件定位
 
 MuNan AI 是一个基于 Tauri 2 + React + TypeScript + Rust 的桌面端多模型 AI 对话工具。
@@ -11,6 +13,7 @@ MuNan AI 是一个基于 Tauri 2 + React + TypeScript + Rust 的桌面端多模�
 - 多供应商对话：支持 OpenAI、DeepSeek、Qwen、MIMO、NVIDIA。
 - 自定义供应商：设置页模型导航可手动添加 OpenAI-compatible 模型供应商。
 - 多模态模型：每个聊天模型可独立开启 `is_multimodal`，开启后聊天输入区支持图片附件，并按 OpenAI-compatible `image_url` 消息格式发送。
+- AI HTML/CSS 卡片：模型可在 `display_text` 内输出 `<ai_card>`，前端用沙箱 iframe 渲染简单版/完整版，并在消息操作区提供卡片视图切换按钮。
 - 多会话管理：每个模型有独立会话列表，聊天记录长期保存在 Tauri 后端 SQLite。
 - Token 用量统计：成功聊天请求会记录供应商返回的 usage，设置页单独展示统计、趋势图、柱形图和模型占比饼图，支持日期筛选；明细默认永久保存，日汇总长期保存。
 - 模型配置中心：设置页统一维护各供应商的 Base URL、API Key、模型名、自定义模型列表和多模态开关。
@@ -22,6 +25,7 @@ MuNan AI 是一个基于 Tauri 2 + React + TypeScript + Rust 的桌面端多模�
 - 双文本回复：AI 回复会拆成用户可见文本和 TTS 朗读文本，朗读文本可携带风格标签与音频标签。
 - AI 人设：设置页“基础配置”可编辑用户名和后台人设提示词；人设有独立开关，开启时才作为 system message 注入。
 - Agent 设置与快速动作：设置页新增“Agent 设置”，可管理 Agent 总开关、浏览器操作、系统操作、Shell 执行、Tavily 联网搜索、高风险确认、单次步数和技能白名单；聊天页会先识别 Agent 指令，当前可执行打开网页、读取网页文本、打开本地路径、复制文本，并可由 AI 根据对话需求自动规划 Shell 命令或 Tavily 搜索。
+- 计划任务：设置页新增独立“计划任务”设置选项，可手动创建单次任务或重复任务；重复任务支持按日、周、月、年和自定义天数执行。聊天页可解析 `<scheduled_task>` 自动创建任务，并在应用打开时到点执行。
 - 响应式布局：聊天页和设置页已适配 PC、平板和手机。手机端聊天页使用可折叠模型/会话侧边栏，消息区独立滚动，输入区固定在底部。
 
 ## 2. 技术栈
@@ -109,6 +113,8 @@ src/
 - `UsageConfig`：Token 用量统计配置，目前包含 `detail_retention_days`，默认 0，表示永久保存明细。
 - `AgentConfig`：Agent 能力配置，包含 `enabled`、`tavily_api_key`、`tavily_max_results`、`require_confirmation`、`max_steps` 和 `enabled_skills`。
 - `AGENT_SKILLS`：前端技能白名单元数据，包含浏览器打开网页、读取页面文本、打开本地路径、复制文本、由 AI 规划的 Shell 执行和 Tavily 搜索。
+- `AgentScheduledTask`：计划任务结构，包含任务标题、提示词、下一次执行时间、任务类型、单次/重复调度规则、执行模型、来源、状态和上次执行信息。
+- `loadAgentScheduledTasks()` / `saveAgentScheduledTasks()`：计划任务本地读写工具，保存到 `localStorage.agentScheduledTasks`，并通过 `agentScheduledTasksChanged` 事件通知聊天页和设置页刷新。
 - `SpeechConfig`：ASR/TTS 配置组合。
 - `AppConfig`：整份应用配置结构。
 - `createEmptyAppConfig()`：生成完整空配置。
@@ -161,6 +167,9 @@ src/
 - 发送聊天消息：调用 `invoke<ChatReply>("chat_with_ai", { model, messages })`。
 - 当前模型开启 `is_multimodal` 时，输入区可选择图片；用户消息会转换为 `[{ type: "text" }, { type: "image_url" }]` 内容数组。
 - AI 返回内容中如果包含 Markdown 图片或兼容接口返回的 `image_url` part，前端会转成消息附件渲染。
+- AI 返回内容中如果包含 `<ai_card>`，前端会解析 `title`、`simple_html`、`full_html`、`css`，并由 `ChatMessageBubble` 以内嵌沙箱 iframe 渲染；简单版/完整版切换按钮放在 AI 回复操作区。
+- AI 返回内容中如果包含 `<scheduled_task>`，前端会解析为 `AgentScheduledTask` 并写入本地任务列表，用户可在设置页“计划任务”中继续管理。
+- 聊天页会每 15 秒检查一次到期计划任务。提醒类任务直接写入计划任务会话；AI 执行类任务会调用对应模型，必要时仍可走 Tavily 或 Shell 工具拦截链路，最终把结果写入该模型的“计划任务”会话。单次任务执行成功后标记完成，重复任务执行成功后自动计算下一次执行时间并继续保持待执行。
 - 每条 AI 回复提供复制、朗读、显示原文和编辑按钮。
 - 朗读按钮优先使用 `message.tts_text`，没有朗读文本时回退到 `message.content`。
 - 处理语音输入：录音、转 WAV、调用 `transcribe_audio`、把识别文本追加到输入框。
@@ -190,11 +199,13 @@ App.tsx sendMessage()
   -> Tauri invoke("chat_with_ai")
   -> Rust commands/chat.rs
   -> 读取 persona.username / persona.enabled / persona.prompt
+  -> 注入当前本地时间，帮助模型把“明天/下周”等相对时间换算成具体日期
   -> 注入 prompts/chat_response_guide.md
   -> 调用对应 AI provider
   -> 解析 <display_text> 与 <tts_text>
   -> 返回 ChatReply
-  -> 前端保存 content / tts_text / original_content
+  -> 前端解析 <ai_card> / <scheduled_task> / <tool_call>
+  -> 前端保存 content / tts_text / original_content / attachments
 ```
 
 ### `src/Settings.tsx`
@@ -202,11 +213,12 @@ App.tsx sendMessage()
 设置页主组件，主要职责：
 
 - 进入页面时读取 `load_app_config`。
-- 左侧展示五类设置入口：基础配置、模型配置、ASR/TTS 配置、用量统计、Agent 设置；左栏桌面端固定自身高度，不随右侧内容切换伸缩。
+- 左侧展示六类设置入口：基础配置、模型配置、ASR/TTS 配置、用量统计、Agent 设置、计划任务；左栏桌面端固定自身高度，不随右侧内容切换伸缩。
 - 基础配置中维护 `persona.username`、`persona.enabled`、`persona.prompt`、默认模型和 WebDAV 配置。
 - 用量统计独立为设置分类，展示筛选范围、今日、本月、明细数量、线性趋势图、每日柱形图和各模型占比饼图。
 - 用量统计页可设置明细保存时间，0 表示永久保存，7-3650 表示自动清理更早明细。
 - Agent 设置页可配置 Agent 总开关、浏览器/系统/Shell/Tavily 能力开关、Tavily API Key、Tavily 最大结果数、高风险确认策略、单次任务步数和技能白名单，并通过 `preview_agent_capabilities` 检查当前表单会启用哪些技能。
+- 计划任务页可创建、暂停、删除和重置计划任务。调度方式分为单次任务和重复任务；重复任务支持按日、周、月、年和自定义天数。任务类型分为提醒和 AI 执行；AI 执行会按任务绑定的模型到点调用模型并把结果写入计划任务会话。
 - 可在模型导航中添加自定义供应商，自定义供应商按 OpenAI-compatible 接口调用。
 - 编辑当前供应商的 `base_url`、`api_key`、`model`、`is_multimodal`。
 - 维护自定义模型列表。
@@ -317,6 +329,7 @@ OpenAI-like/MIMO：
 - 读取 `AppConfig`。
 - 将 `persona.username` 作为用户信息 system message 注入。
 - `persona.enabled` 开启时，将 `persona.prompt` 作为人设 system message 注入。
+- 将当前本地时间作为 system message 注入，用于计划任务和相对时间解析。
 - 将 `src-tauri/prompts/chat_response_guide.md` 作为双文本回复格式引导注入。
 - 按模型供应商分发到 `src-tauri/src/ai/*`。
 - 未命中内置供应商时，会在 `custom_providers` 中查找同名 `id`，并使用 `openai_like::chat_api` 调用。
@@ -324,6 +337,7 @@ OpenAI-like/MIMO：
 - OpenAI-compatible 响应会解析 `usage.prompt_tokens`、`usage.completion_tokens`、`usage.total_tokens`；不返回 usage 的供应商会只记录请求次数，token 数为 0。
 - 请求模型前会保留最近 80 条上下文消息，避免长会话无限膨胀导致请求过慢或超上下文。
 - 从模型输出中解析 `<display_text>` 和 `<tts_text>`。
+- TTS fallback 会忽略 `<ai_card>` 和 `<scheduled_task>` 原始标签块，避免朗读 HTML 或任务元数据。
 - 返回 `ChatReply { content, tts_text, original_content }`。
 
 解析失败时会把模型原始输出作为 `content`，`tts_text` 留空，保证聊天不会因为格式问题中断。`original_content` 保存模型原始输出，用于前端“显示原文”。
@@ -343,6 +357,12 @@ OpenAI-like/MIMO：
 ```
 
 `tts_text` 必须忠实于 `display_text`，不能新增事实、承诺或结论。包含代码时，朗读稿只概括代码作用，不逐字朗读代码。
+
+支持的特殊块：
+
+- `<ai_card>`：放在 `display_text` 内，包含 `title`、`simple_html`、`full_html`、`css`。前端负责渲染卡片，不会把原始 HTML 展示在正文里。卡片不允许 JavaScript、外部脚本或外部 CSS。
+- `<tool_call>`：请求真实 Agent 工具调用，例如 Shell 或 Tavily。前端拦截执行后会把真实结果送回模型总结。
+- `<scheduled_task>`：请求创建计划任务，包含 `title`、`scheduled_at`、`kind`、`prompt`。`scheduled_at` 必须是明确 ISO 时间；`kind` 只能是 `reminder` 或 `ai_prompt`。重复任务可额外包含 `schedule_type=recurring`、`recurrence=daily|weekly|monthly|yearly|custom_days`，自定义天数再写 `custom_interval_days`。
 
 ### `src-tauri/src/speech/tts.rs`
 
@@ -508,6 +528,7 @@ ASR 配置示例：
 
 - `userState`：最近使用的模型和会话 ID。
 - `preferredModel`：设置页选定的默认模型。
+- `agentScheduledTasks`：计划任务列表，由设置页和聊天页共同读写；应用打开时聊天页负责到点执行。`scheduled_at` 表示下一次执行时间，重复任务每次成功执行后会更新这个字段。
 - `chatConversations`：仅作为旧版本迁移来源；迁移成功后会删除。
 
 后端配置和聊天历史都不再依赖 `localStorage`。
@@ -590,6 +611,29 @@ ASR 配置示例：
 
 后续接入完整工具循环时，建议先做独立浏览器 Profile 的浏览器 Agent，再逐步加入截图观察、点击、填写表单等能力；删除、提交、发送、上传、输入敏感信息、运行命令等操作必须走确认流程。
 
+### 改计划任务
+
+优先看：
+
+- `src/modelConfig.ts` 的 `AgentScheduledTask`、`loadAgentScheduledTasks()`、`saveAgentScheduledTasks()`。
+- `src/Settings.tsx` 的“计划任务”分类和 `ScheduledTaskSettingsPanel`。
+- `src/App.tsx` 的 `runDueScheduledTasks()`、`runScheduledTask()`、`createScheduledTasksFromReply()`、`buildScheduledTaskUserPrompt()`。
+- `src-tauri/prompts/chat_response_guide.md` 的 `<scheduled_task>` 输出规范。
+- `src-tauri/src/commands/chat.rs` 的当前本地时间 system message。
+
+注意：当前计划任务是应用内调度，应用需要处于打开状态才会检查和执行；还没有接入系统级后台计划任务或系统通知。
+
+### 改 AI HTML/CSS 卡片
+
+优先看：
+
+- `src/components/ChatMessageBubble.tsx` 的卡片解析、iframe 渲染和简单/完整切换按钮。
+- `src/styles/App.css` 的 `.ai-html-card`、卡片气泡宽度和消息操作区样式。
+- `src-tauri/prompts/chat_response_guide.md` 的 `<ai_card>` 输出规范。
+- `src/App.tsx` 的回复保存逻辑，确保 `<ai_card>` 不影响图片附件、工具调用和计划任务解析。
+
+注意：卡片 HTML 在 iframe `srcdoc` 中渲染，sandbox 不允许脚本执行；卡片宽高应跟随内容弹性变化，避免固定外层聊天气泡尺寸。
+
 ### 改 TTS
 
 优先看：
@@ -629,6 +673,9 @@ pnpm tauri dev
 - ASR 配置不完整时，有清晰错误提示。
 - 多模态开关关闭时，图片按钮禁用；开启后可添加图片、预览、移除，并随消息保存到 SQLite。
 - 支持视觉输入的供应商应能收到 `image_url` 消息；返回 Markdown 图片时聊天气泡应直接显示图片。
+- AI 回复包含 `<ai_card>` 时，聊天气泡应显示卡片而不是原始标签，简单/完整切换后气泡宽高应随内容恢复。
+- 设置页“计划任务”应能新增、暂停、删除和重置任务；聊天里要求未来提醒时应自动创建任务。
+- 到点计划任务应写入对应模型的“计划任务”会话；应用关闭期间不会后台执行。
 - 成功聊天后，设置页用量统计能看到请求次数；供应商返回 usage 时能看到 token 数增长。
 - 日期筛选后，线性图、柱形图和模型占比饼图应按筛选范围更新。
 - 明细保存时间默认为 0，即永久保存；修改为具体天数并保存后，后续成功请求会按新天数清理旧明细。
@@ -661,6 +708,8 @@ pnpm tauri dev
 | 图片消息不显示 | `src/components/ChatMessageBubble.tsx`, `src-tauri/src/storage.rs` |
 | Token 统计不增长 | `src-tauri/src/commands/chat.rs`, `src-tauri/src/storage.rs`, 供应商响应 `usage` |
 | VoiceDesign 报缺少音色描述 | 设置页 TTS 的“音色描述”字段 |
+| AI 卡片显示异常 | `src/components/ChatMessageBubble.tsx`, `src/styles/App.css`, `src-tauri/prompts/chat_response_guide.md` |
+| 计划任务不创建或不执行 | `src/Settings.tsx`, `src/App.tsx`, `src/modelConfig.ts`, `src-tauri/prompts/chat_response_guide.md` |
 | 新增模型下拉选项 | `src/modelConfig.ts` 的 `MODEL_CATALOG` |
 | 改窗口大小或标题 | `src-tauri/tauri.conf.json` |
 | 改全局视觉风格 | `src/styles/base.css` |

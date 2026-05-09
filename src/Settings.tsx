@@ -3,8 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type { IconType } from "react-icons";
 import { useNavigate } from "react-router-dom";
 import {
+  IoAdd,
+  IoAlarmOutline,
   IoArrowBack,
   IoAnalyticsOutline,
+  IoCalendarOutline,
   IoCheckmarkCircle,
   IoClose,
   IoCloudUploadOutline,
@@ -20,6 +23,7 @@ import {
   IoSave,
   IoShieldCheckmarkOutline,
   IoSparklesOutline,
+  IoTrashOutline,
 } from "react-icons/io5";
 
 import "./styles/base.css";
@@ -35,22 +39,31 @@ import {
   revealConfigBackup,
 } from "./settings/configBackup";
 import {
+  AGENT_SCHEDULED_TASKS_CHANGED_EVENT,
   AGENT_SKILLS,
+  type AgentScheduledTask,
+  type AgentScheduledTaskKind,
+  type AgentScheduledTaskRecurrence,
+  type AgentScheduledTaskScheduleType,
   type AppConfig,
   type AsrProvider,
   type AgentConfig,
   type ModelType,
   createEmptyAppConfig,
+  createAgentScheduledTaskId,
   getModelChoices,
   getModelConfig,
   getModelMeta,
   getModelOptions,
   isBuiltInModel,
+  loadAgentScheduledTasks,
   normalizeAgentMaxSteps,
+  normalizeAgentTaskCustomIntervalDays,
   loadPreferredModel,
   normalizeRetentionDays,
   normalizeTavilyMaxResults,
   normalizeAppConfig,
+  saveAgentScheduledTasks,
   savePreferredModel,
   updateModelConfig,
 } from "./modelConfig";
@@ -64,7 +77,7 @@ const TENCENT_ASR_ENGINE_OPTIONS = [
   { value: "8k_en", label: "8k_en（电话英语）" },
 ];
 
-type SettingsSection = "user" | "model" | "speech" | "usage" | "agent";
+type SettingsSection = "user" | "model" | "speech" | "usage" | "agent" | "schedule";
 
 type TokenUsageTotal = {
   prompt_tokens: number;
@@ -102,6 +115,17 @@ type AgentCapabilityPreview = {
   message: string;
 };
 
+type AgentScheduleForm = {
+  title: string;
+  prompt: string;
+  scheduledAt: string;
+  kind: AgentScheduledTaskKind;
+  scheduleType: AgentScheduledTaskScheduleType;
+  recurrence: AgentScheduledTaskRecurrence;
+  customIntervalDays: string;
+  model: ModelType;
+};
+
 const SETTINGS_SECTIONS: Array<{
   id: SettingsSection;
   title: string;
@@ -113,6 +137,7 @@ const SETTINGS_SECTIONS: Array<{
   { id: "speech", title: "ASR / TTS 配置", meta: "语音识别与语音合成", icon: IoMicOutline },
   { id: "usage", title: "用量统计", meta: "Token 消耗、趋势图与模型占比", icon: IoAnalyticsOutline },
   { id: "agent", title: "Agent 设置", meta: "工具开关、搜索参数与执行限制", icon: IoSparklesOutline },
+  { id: "schedule", title: "计划任务", meta: "提醒、闹钟与 AI 定时执行", icon: IoAlarmOutline },
 ];
 
 /* =========================
@@ -165,6 +190,11 @@ function Settings() {
   const [usageEndDate, setUsageEndDate] = useState("");
   const [agentPreview, setAgentPreview] = useState<AgentCapabilityPreview | null>(null);
   const [agentPreviewError, setAgentPreviewError] = useState("");
+  const [scheduledTasks, setScheduledTasks] = useState<AgentScheduledTask[]>([]);
+  const [scheduleForm, setScheduleForm] = useState<AgentScheduleForm>(() =>
+    createDefaultAgentScheduleForm(loadPreferredModel())
+  );
+  const [scheduleError, setScheduleError] = useState("");
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   /**
@@ -185,6 +215,11 @@ function Settings() {
   const usageChartPoints = useMemo(
     () => usageDailyPoints.slice(-24),
     [usageDailyPoints]
+  );
+  const pendingScheduledTaskCount = useMemo(
+    () =>
+      scheduledTasks.filter((task) => task.enabled && task.status === "pending").length,
+    [scheduledTasks]
   );
 
   /**
@@ -208,6 +243,21 @@ function Settings() {
     };
 
     void loadConfig();
+  }, []);
+
+  useEffect(() => {
+    const refreshScheduledTasks = () => {
+      setScheduledTasks(loadAgentScheduledTasks());
+    };
+
+    refreshScheduledTasks();
+    window.addEventListener(AGENT_SCHEDULED_TASKS_CHANGED_EVENT, refreshScheduledTasks);
+    window.addEventListener("storage", refreshScheduledTasks);
+
+    return () => {
+      window.removeEventListener(AGENT_SCHEDULED_TASKS_CHANGED_EVENT, refreshScheduledTasks);
+      window.removeEventListener("storage", refreshScheduledTasks);
+    };
   }, []);
 
   const loadTokenUsageStats = async (
@@ -409,6 +459,141 @@ function Settings() {
     } catch (previewError) {
       setAgentPreviewError(`Agent 配置检查失败：${String(previewError)}`);
     }
+  };
+
+  const saveScheduledTaskList = (tasks: AgentScheduledTask[], feedback?: string) => {
+    const normalizedTasks = [...tasks].sort((left, right) => left.scheduled_at - right.scheduled_at);
+    saveAgentScheduledTasks(normalizedTasks);
+    setScheduledTasks(loadAgentScheduledTasks());
+    setScheduleError("");
+    setError("");
+
+    if (feedback) {
+      setMessage(feedback);
+    }
+  };
+
+  const updateScheduleFormField = <K extends keyof AgentScheduleForm>(
+    field: K,
+    value: AgentScheduleForm[K]
+  ) => {
+    setScheduleError("");
+    setScheduleForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const addScheduledTask = () => {
+    const title = scheduleForm.title.trim();
+    const prompt = scheduleForm.prompt.trim();
+    const scheduledAt = new Date(scheduleForm.scheduledAt).getTime();
+    const customIntervalDays = normalizeAgentTaskCustomIntervalDays(
+      Number(scheduleForm.customIntervalDays)
+    );
+
+    if (!title) {
+      setScheduleError("请填写任务名称。");
+      return;
+    }
+
+    if (!Number.isFinite(scheduledAt)) {
+      setScheduleError("请选择有效的执行日期和时间。");
+      return;
+    }
+
+    if (scheduledAt <= Date.now()) {
+      setScheduleError("计划任务需要设置为未来时间。");
+      return;
+    }
+
+    if (!prompt) {
+      setScheduleError("请填写到点后要提醒或执行的内容。");
+      return;
+    }
+
+    if (
+      scheduleForm.scheduleType === "recurring" &&
+      scheduleForm.recurrence === "custom_days" &&
+      (!scheduleForm.customIntervalDays.trim() ||
+        !Number.isFinite(Number(scheduleForm.customIntervalDays)) ||
+        Number(scheduleForm.customIntervalDays) <= 0)
+    ) {
+      setScheduleError("自定义重复天数需要填写大于 0 的数字。");
+      return;
+    }
+
+    const now = Date.now();
+    const nextTask: AgentScheduledTask = {
+      id: createAgentScheduledTaskId(),
+      title,
+      prompt,
+      scheduled_at: scheduledAt,
+      enabled: true,
+      kind: scheduleForm.kind,
+      schedule_type: scheduleForm.scheduleType,
+      recurrence:
+        scheduleForm.scheduleType === "recurring" ? scheduleForm.recurrence : undefined,
+      custom_interval_days:
+        scheduleForm.scheduleType === "recurring" &&
+        scheduleForm.recurrence === "custom_days"
+          ? customIntervalDays
+          : undefined,
+      status: "pending",
+      model: scheduleForm.model,
+      source: "manual",
+      created_at: now,
+      updated_at: now,
+    };
+
+    saveScheduledTaskList([...scheduledTasks, nextTask], "计划任务已添加。");
+    setScheduleForm((current) => ({
+      ...createDefaultAgentScheduleForm(current.model),
+      kind: current.kind,
+      scheduleType: current.scheduleType,
+      recurrence: current.recurrence,
+      customIntervalDays: current.customIntervalDays,
+    }));
+  };
+
+  const toggleScheduledTask = (taskId: string) => {
+    saveScheduledTaskList(
+      scheduledTasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              enabled: !task.enabled,
+              status: task.status === "pending" ? task.status : "pending",
+              updated_at: Date.now(),
+              last_error: task.enabled ? task.last_error : undefined,
+            }
+          : task
+      )
+    );
+  };
+
+  const resetScheduledTask = (taskId: string) => {
+    saveScheduledTaskList(
+      scheduledTasks.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              enabled: true,
+              status: "pending",
+              updated_at: Date.now(),
+              last_error: undefined,
+            }
+          : task
+      ),
+      "计划任务已重新启用。"
+    );
+  };
+
+  const deleteScheduledTask = (taskId: string) => {
+    saveScheduledTaskList(
+      scheduledTasks.filter((task) => task.id !== taskId),
+      "计划任务已删除。"
+    );
   };
 
   const isPasswordVisible = (field: string) => visiblePasswordFields.includes(field);
@@ -1407,6 +1592,24 @@ function Settings() {
                 </div>
               )}
 
+              {activeSection === "schedule" && (
+                <div className="settings-form agent-schedule-settings-form">
+                  <ScheduledTaskSettingsPanel
+                    pendingScheduledTaskCount={pendingScheduledTaskCount}
+                    scheduleForm={scheduleForm}
+                    modelOptions={modelOptions}
+                    scheduleError={scheduleError}
+                    scheduledTasks={scheduledTasks}
+                    config={config}
+                    updateScheduleFormField={updateScheduleFormField}
+                    addScheduledTask={addScheduledTask}
+                    toggleScheduledTask={toggleScheduledTask}
+                    resetScheduledTask={resetScheduledTask}
+                    deleteScheduledTask={deleteScheduledTask}
+                  />
+                </div>
+              )}
+
               {activeSection === "model" && (
                 <div className="settings-form">
                   <div className="settings-checklist">
@@ -2004,6 +2207,281 @@ function Settings() {
 
 export default Settings;
 
+type ScheduledTaskSettingsPanelProps = {
+  pendingScheduledTaskCount: number;
+  scheduleForm: AgentScheduleForm;
+  modelOptions: ReturnType<typeof getModelOptions>;
+  scheduleError: string;
+  scheduledTasks: AgentScheduledTask[];
+  config: AppConfig;
+  updateScheduleFormField: <K extends keyof AgentScheduleForm>(
+    field: K,
+    value: AgentScheduleForm[K]
+  ) => void;
+  addScheduledTask: () => void;
+  toggleScheduledTask: (taskId: string) => void;
+  resetScheduledTask: (taskId: string) => void;
+  deleteScheduledTask: (taskId: string) => void;
+};
+
+function ScheduledTaskSettingsPanel({
+  pendingScheduledTaskCount,
+  scheduleForm,
+  modelOptions,
+  scheduleError,
+  scheduledTasks,
+  config,
+  updateScheduleFormField,
+  addScheduledTask,
+  toggleScheduledTask,
+  resetScheduledTask,
+  deleteScheduledTask,
+}: ScheduledTaskSettingsPanelProps) {
+  return (
+    <div className="settings-field settings-field--wide agent-schedule-panel">
+      <div className="settings-field__header">
+        <div className="agent-setting-title">
+          <IoAlarmOutline size={20} />
+          <div>
+            <p className="section-kicker">Schedule</p>
+            <h3>计划任务</h3>
+          </div>
+        </div>
+        <span className="status-chip">
+          {pendingScheduledTaskCount} 个待执行
+        </span>
+      </div>
+      <p className="settings-help-text">
+        可以在这里设置某个日期和时间点自动提醒，或让 AI 到点后按任务内容生成回复。聊天里说“明早 8 点提醒我看天气”时，也会自动创建到这里。
+      </p>
+
+      <div className="agent-schedule-form">
+        <div className="agent-schedule-form__field">
+          <label htmlFor="agent-schedule-title">任务名称</label>
+          <input
+            id="agent-schedule-title"
+            className="settings-input"
+            type="text"
+            value={scheduleForm.title}
+            placeholder="例如 天气提醒"
+            onChange={(event) =>
+              updateScheduleFormField("title", event.target.value)
+            }
+          />
+        </div>
+
+        <div className="agent-schedule-form__field">
+          <label htmlFor="agent-schedule-time">
+            {scheduleForm.scheduleType === "recurring" ? "首次执行时间" : "执行时间"}
+          </label>
+          <input
+            id="agent-schedule-time"
+            className="settings-input"
+            type="datetime-local"
+            value={scheduleForm.scheduledAt}
+            onChange={(event) =>
+              updateScheduleFormField("scheduledAt", event.target.value)
+            }
+          />
+        </div>
+
+        <div className="agent-schedule-form__field">
+          <label htmlFor="agent-schedule-type">调度方式</label>
+          <CustomSelect
+            id="agent-schedule-type"
+            className="settings-input"
+            value={scheduleForm.scheduleType}
+            options={[
+              { value: "once", label: "单次任务" },
+              { value: "recurring", label: "重复任务" },
+            ]}
+            onChange={(value) =>
+              updateScheduleFormField(
+                "scheduleType",
+                value as AgentScheduledTaskScheduleType
+              )
+            }
+          />
+        </div>
+
+        {scheduleForm.scheduleType === "recurring" && (
+          <>
+            <div className="agent-schedule-form__field">
+              <label htmlFor="agent-schedule-recurrence">重复周期</label>
+              <CustomSelect
+                id="agent-schedule-recurrence"
+                className="settings-input"
+                value={scheduleForm.recurrence}
+                options={[
+                  { value: "daily", label: "按日" },
+                  { value: "weekly", label: "按周" },
+                  { value: "monthly", label: "按月" },
+                  { value: "yearly", label: "按年" },
+                  { value: "custom_days", label: "自定义天数" },
+                ]}
+                onChange={(value) =>
+                  updateScheduleFormField(
+                    "recurrence",
+                    value as AgentScheduledTaskRecurrence
+                  )
+                }
+              />
+            </div>
+
+            {scheduleForm.recurrence === "custom_days" && (
+              <div className="agent-schedule-form__field">
+                <label htmlFor="agent-schedule-custom-days">间隔天数</label>
+                <input
+                  id="agent-schedule-custom-days"
+                  className="settings-input"
+                  type="number"
+                  min={1}
+                  max={3650}
+                  value={scheduleForm.customIntervalDays}
+                  onChange={(event) =>
+                    updateScheduleFormField("customIntervalDays", event.target.value)
+                  }
+                />
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="agent-schedule-form__field">
+          <label htmlFor="agent-schedule-kind">任务类型</label>
+          <CustomSelect
+            id="agent-schedule-kind"
+            className="settings-input"
+            value={scheduleForm.kind}
+            options={[
+              { value: "reminder", label: "提醒" },
+              { value: "ai_prompt", label: "AI 执行" },
+            ]}
+            onChange={(value) =>
+              updateScheduleFormField("kind", value as AgentScheduledTaskKind)
+            }
+          />
+        </div>
+
+        <div className="agent-schedule-form__field">
+          <label htmlFor="agent-schedule-model">执行模型</label>
+          <CustomSelect
+            id="agent-schedule-model"
+            className="settings-input"
+            value={scheduleForm.model}
+            options={modelOptions.map((option) => ({
+              value: option.id,
+              label: `${option.label} · ${option.provider}`,
+            }))}
+            onChange={(value) =>
+              updateScheduleFormField("model", value as ModelType)
+            }
+          />
+        </div>
+
+        <div className="agent-schedule-form__field agent-schedule-form__field--wide">
+          <label htmlFor="agent-schedule-prompt">任务内容</label>
+          <textarea
+            id="agent-schedule-prompt"
+            className="settings-input settings-textarea"
+            value={scheduleForm.prompt}
+            placeholder="例如 到点提醒我看李沧区天气，并给出出门建议。"
+            onChange={(event) =>
+              updateScheduleFormField("prompt", event.target.value)
+            }
+          />
+        </div>
+
+        <div className="agent-schedule-form__actions">
+          <button type="button" className="primary-button" onClick={addScheduledTask}>
+            <IoAdd size={18} />
+            添加计划任务
+          </button>
+        </div>
+      </div>
+
+      {scheduleError && (
+        <p className="settings-help-text settings-help-text--danger">
+          {scheduleError}
+        </p>
+      )}
+
+      <div className="agent-schedule-list">
+        {scheduledTasks.length > 0 ? (
+          scheduledTasks.map((task) => (
+            <article
+              className={`agent-schedule-card ${
+                task.enabled && task.status === "pending" ? "is-enabled" : ""
+              }`}
+              key={task.id}
+            >
+              <div className="agent-schedule-card__body">
+                <div className="agent-schedule-card__title">
+                  <strong>{task.title}</strong>
+                  <span className={`status-chip ${task.status === "failed" ? "is-danger" : ""}`}>
+                    {formatScheduledTaskStatus(task)}
+                  </span>
+                </div>
+                <div className="agent-schedule-meta">
+                  <span>
+                    <IoCalendarOutline size={14} />
+                    {task.schedule_type === "recurring" ? "下次 " : ""}
+                    {formatScheduledTaskTime(task.scheduled_at)}
+                  </span>
+                  <span>{formatScheduledTaskSchedule(task)}</span>
+                  <span>{formatScheduledTaskKind(task.kind)}</span>
+                  <span>{getModelMeta(config, task.model).label}</span>
+                  <span>{task.source === "chat" ? "聊天创建" : "手动创建"}</span>
+                </div>
+                <p>{task.prompt}</p>
+                {task.last_error && (
+                  <p className="settings-help-text settings-help-text--danger">
+                    上次执行失败：{task.last_error}
+                  </p>
+                )}
+              </div>
+
+              <div className="agent-schedule-card__actions">
+                {task.status === "pending" ? (
+                  <label className="settings-switch" title={task.enabled ? "暂停任务" : "启用任务"}>
+                    <input
+                      type="checkbox"
+                      checked={task.enabled}
+                      onChange={() => toggleScheduledTask(task.id)}
+                    />
+                    <span />
+                  </label>
+                ) : (
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => resetScheduledTask(task.id)}
+                  >
+                    <IoRefresh size={16} />
+                    重置
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="ghost-button danger-button"
+                  onClick={() => deleteScheduledTask(task.id)}
+                >
+                  <IoTrashOutline size={16} />
+                  删除
+                </button>
+              </div>
+            </article>
+          ))
+        ) : (
+          <div className="agent-schedule-empty">
+            暂无计划任务。可以先添加一个天气提醒、闹钟提醒或日程提醒。
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const USAGE_CHART_COLORS = [
   "#1d72f3",
   "#15a06d",
@@ -2091,3 +2569,79 @@ const formatPercent = (
 
   return `${((getUsageModelValue(item) / total) * 100).toFixed(1)}%`;
 };
+
+function createDefaultAgentScheduleForm(model: ModelType): AgentScheduleForm {
+  return {
+    title: "",
+    prompt: "",
+    scheduledAt: toLocalDateTimeInputValue(Date.now() + 60 * 60 * 1000),
+    kind: "reminder",
+    scheduleType: "once",
+    recurrence: "daily",
+    customIntervalDays: "2",
+    model,
+  };
+}
+
+function toLocalDateTimeInputValue(timestamp: number): string {
+  const date = new Date(timestamp);
+  const parts = [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate()),
+    padDatePart(date.getHours()),
+    padDatePart(date.getMinutes()),
+  ];
+
+  return `${parts[0]}-${parts[1]}-${parts[2]}T${parts[3]}:${parts[4]}`;
+}
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function formatScheduledTaskTime(timestamp: number): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(timestamp));
+}
+
+function formatScheduledTaskKind(kind: AgentScheduledTaskKind): string {
+  return kind === "reminder" ? "提醒" : "AI 执行";
+}
+
+function formatScheduledTaskSchedule(task: AgentScheduledTask): string {
+  if (task.schedule_type !== "recurring") {
+    return "单次";
+  }
+
+  switch (task.recurrence) {
+    case "weekly":
+      return "每周重复";
+    case "monthly":
+      return "每月重复";
+    case "yearly":
+      return "每年重复";
+    case "custom_days":
+      return `每 ${task.custom_interval_days ?? 1} 天`;
+    case "daily":
+    default:
+      return "每日重复";
+  }
+}
+
+function formatScheduledTaskStatus(task: AgentScheduledTask): string {
+  if (task.status === "done") {
+    return "已完成";
+  }
+
+  if (task.status === "failed") {
+    return "执行失败";
+  }
+
+  return task.enabled ? "待执行" : "已暂停";
+}

@@ -461,6 +461,133 @@
   line-height: 1.45;
 }
 
+.agent-schedule-panel {
+  gap: 12px;
+}
+
+.agent-schedule-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid var(--line-soft);
+}
+
+.agent-schedule-form__field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-schedule-form__field--wide {
+  grid-column: 1 / -1;
+}
+
+.agent-schedule-form__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.agent-schedule-list {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-schedule-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(122, 139, 163, 0.16);
+}
+
+.agent-schedule-card.is-enabled {
+  background: rgba(239, 246, 255, 0.84);
+  border-color: rgba(29, 114, 243, 0.22);
+}
+
+.agent-schedule-card__body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-schedule-card__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-schedule-card__title strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-1);
+  font-size: 14px;
+}
+
+.agent-schedule-card__title .status-chip.is-danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.agent-schedule-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-schedule-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 9px;
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--line-soft);
+}
+
+.agent-schedule-card__body p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.agent-schedule-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-schedule-card__actions .settings-switch {
+  margin-right: 2px;
+}
+
+.agent-schedule-empty {
+  padding: 14px;
+  border-radius: var(--radius-md);
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px dashed rgba(122, 139, 163, 0.28);
+}
+
 .usage-filter-grid > div:nth-child(2) .custom-date__panel {
   left: auto;
   right: 0;
@@ -958,6 +1085,18 @@ select.settings-input {
 
   .agent-skill-grid {
     grid-template-columns: 1fr;
+  }
+
+  .agent-schedule-form {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-schedule-card {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-schedule-card__actions {
+    justify-content: flex-start;
   }
 
   .settings-category-card {

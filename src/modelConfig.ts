@@ -113,6 +113,40 @@ export type AgentConfig = {
   enabled_skills: string[];
 };
 
+export type AgentScheduledTaskKind = "reminder" | "ai_prompt";
+
+export type AgentScheduledTaskStatus = "pending" | "done" | "failed";
+
+export type AgentScheduledTaskSource = "manual" | "chat";
+
+export type AgentScheduledTaskScheduleType = "once" | "recurring";
+
+export type AgentScheduledTaskRecurrence =
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "yearly"
+  | "custom_days";
+
+export type AgentScheduledTask = {
+  id: string;
+  title: string;
+  prompt: string;
+  scheduled_at: number;
+  enabled: boolean;
+  kind: AgentScheduledTaskKind;
+  schedule_type: AgentScheduledTaskScheduleType;
+  recurrence?: AgentScheduledTaskRecurrence;
+  custom_interval_days?: number;
+  status: AgentScheduledTaskStatus;
+  model: ModelType;
+  source: AgentScheduledTaskSource;
+  created_at: number;
+  updated_at: number;
+  last_run_at?: number;
+  last_error?: string;
+};
+
 export type AppConfig = Record<BuiltInModelType, ModelConfig> & {
   schema_version: number;
   speech: SpeechConfig;
@@ -236,6 +270,9 @@ const DEFAULT_AGENT_SKILLS = AGENT_SKILLS.map((skill) => skill.id);
 const CONVERSATIONS_STORAGE_KEY = "chatConversations";
 const USER_STATE_STORAGE_KEY = "userState";
 const PREFERRED_MODEL_STORAGE_KEY = "preferredModel";
+const AGENT_SCHEDULED_TASKS_STORAGE_KEY = "agentScheduledTasks";
+
+export const AGENT_SCHEDULED_TASKS_CHANGED_EVENT = "agentScheduledTasksChanged";
 
 export const createEmptyAppConfig = (): AppConfig => ({
   schema_version: 1,
@@ -536,6 +573,189 @@ export const normalizeRetentionDays = (value: number): number => {
   }
 
   return Math.min(Math.max(days, 7), 3650);
+};
+
+export const createAgentScheduledTaskId = (): string => {
+  return `agent-task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+export const normalizeAgentTaskCustomIntervalDays = (value: number): number => {
+  const days = Math.round(Number(value));
+
+  if (!Number.isFinite(days)) {
+    return 1;
+  }
+
+  return Math.min(Math.max(days, 1), 3650);
+};
+
+export const isRecurringAgentScheduledTask = (task: AgentScheduledTask): boolean => {
+  return task.schedule_type === "recurring";
+};
+
+export const getNextAgentScheduledTaskRun = (
+  task: AgentScheduledTask,
+  fromTime = Date.now()
+): number | null => {
+  if (!isRecurringAgentScheduledTask(task)) {
+    return null;
+  }
+
+  let nextRunAt = task.scheduled_at;
+  let guard = 0;
+
+  while (nextRunAt <= fromTime && guard < 5000) {
+    nextRunAt = addAgentTaskRecurrence(nextRunAt, task);
+    guard += 1;
+  }
+
+  return Number.isFinite(nextRunAt) && nextRunAt > fromTime ? nextRunAt : null;
+};
+
+export const normalizeAgentScheduledTasks = (
+  value: Array<Partial<AgentScheduledTask>> | null | undefined
+): AgentScheduledTask[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const now = Date.now();
+  return value
+    .filter((task) => {
+      return Boolean(
+        task &&
+          typeof task.title === "string" &&
+          task.title.trim() &&
+          typeof task.prompt === "string" &&
+          task.prompt.trim()
+      );
+    })
+    .map((task) => {
+      const scheduledAt = Number(task.scheduled_at);
+      const createdAt = Number(task.created_at) || now;
+      const updatedAt = Number(task.updated_at) || createdAt;
+      const kind: AgentScheduledTaskKind =
+        task.kind === "reminder" ? "reminder" : "ai_prompt";
+      const status: AgentScheduledTaskStatus =
+        task.status === "done" || task.status === "failed" ? task.status : "pending";
+      const source: AgentScheduledTaskSource =
+        task.source === "chat" ? "chat" : "manual";
+      const recurrence: AgentScheduledTaskRecurrence =
+        task.recurrence === "weekly" ||
+        task.recurrence === "monthly" ||
+        task.recurrence === "yearly" ||
+        task.recurrence === "custom_days"
+          ? task.recurrence
+          : "daily";
+      const scheduleType: AgentScheduledTaskScheduleType =
+        task.schedule_type === "recurring" ? "recurring" : "once";
+      const customIntervalDays = normalizeAgentTaskCustomIntervalDays(
+        task.custom_interval_days ?? 1
+      );
+
+      return {
+        id: task.id?.trim() || createAgentScheduledTaskId(),
+        title: task.title!.trim(),
+        prompt: task.prompt!.trim(),
+        scheduled_at: Number.isFinite(scheduledAt) ? scheduledAt : now,
+        enabled: task.enabled ?? status === "pending",
+        kind,
+        schedule_type: scheduleType,
+        recurrence: scheduleType === "recurring" ? recurrence : undefined,
+        custom_interval_days:
+          scheduleType === "recurring" && recurrence === "custom_days"
+            ? customIntervalDays
+            : undefined,
+        status,
+        model: normalizeModelType(task.model),
+        source,
+        created_at: createdAt,
+        updated_at: updatedAt,
+        last_run_at: Number.isFinite(Number(task.last_run_at))
+          ? Number(task.last_run_at)
+          : undefined,
+        last_error: task.last_error?.trim() || undefined,
+      };
+    })
+    .sort((left, right) => left.scheduled_at - right.scheduled_at);
+};
+
+export const loadAgentScheduledTasks = (): AgentScheduledTask[] => {
+  const raw = localStorage.getItem(AGENT_SCHEDULED_TASKS_STORAGE_KEY);
+
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    return normalizeAgentScheduledTasks(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+};
+
+export const saveAgentScheduledTasks = (tasks: AgentScheduledTask[]): void => {
+  localStorage.setItem(
+    AGENT_SCHEDULED_TASKS_STORAGE_KEY,
+    JSON.stringify(normalizeAgentScheduledTasks(tasks))
+  );
+  window.dispatchEvent(new CustomEvent(AGENT_SCHEDULED_TASKS_CHANGED_EVENT));
+};
+
+const addAgentTaskRecurrence = (
+  timestamp: number,
+  task: AgentScheduledTask
+): number => {
+  switch (task.recurrence) {
+    case "weekly":
+      return addDays(timestamp, 7);
+    case "monthly":
+      return addMonthsClamped(timestamp, 1);
+    case "yearly":
+      return addYearsClamped(timestamp, 1);
+    case "custom_days":
+      return addDays(
+        timestamp,
+        normalizeAgentTaskCustomIntervalDays(task.custom_interval_days ?? 1)
+      );
+    case "daily":
+    default:
+      return addDays(timestamp, 1);
+  }
+};
+
+const addDays = (timestamp: number, days: number): number => {
+  const date = new Date(timestamp);
+  date.setDate(date.getDate() + days);
+  return date.getTime();
+};
+
+const addMonthsClamped = (timestamp: number, months: number): number => {
+  const source = new Date(timestamp);
+  const target = new Date(source);
+  const sourceDay = source.getDate();
+
+  target.setDate(1);
+  target.setMonth(target.getMonth() + months);
+  target.setDate(Math.min(sourceDay, getDaysInMonth(target.getFullYear(), target.getMonth())));
+
+  return target.getTime();
+};
+
+const addYearsClamped = (timestamp: number, years: number): number => {
+  const source = new Date(timestamp);
+  const target = new Date(source);
+  const sourceDay = source.getDate();
+
+  target.setDate(1);
+  target.setFullYear(target.getFullYear() + years);
+  target.setDate(Math.min(sourceDay, getDaysInMonth(target.getFullYear(), target.getMonth())));
+
+  return target.getTime();
+};
+
+const getDaysInMonth = (year: number, monthIndex: number): number => {
+  return new Date(year, monthIndex + 1, 0).getDate();
 };
 
 export const createEmptyConversations = (): Record<ModelType, Conversation[]> => ({
