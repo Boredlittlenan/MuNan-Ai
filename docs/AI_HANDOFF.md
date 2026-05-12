@@ -85,9 +85,11 @@ src/
 ├─ App.tsx                # 聊天主页
 ├─ Settings.tsx           # 设置页面
 ├─ ScheduledTaskRunner.tsx # 应用级计划任务运行器
+├─ agent/                 # 聊天侧 Agent 文本解析、工具调用块解析和工具结果上下文
 ├─ audio/recording.ts     # 录音 Blob 转 WAV/Base64 工具
 ├─ components/            # 聊天页拆出的 UI 组件
-├─ settings/              # 设置页辅助工具
+├─ scheduledTasks/        # 聊天侧计划任务解析、兜底创建和提示文案
+├─ settings/              # 设置页辅助工具与计划任务设置面板
 ├─ main.tsx               # React 路由和应用挂载
 ├─ modelConfig.ts         # 前端共享类型、模型元数据、轻量状态和迁移工具
 ├─ vite-env.d.ts          # Vite 类型声明
@@ -169,9 +171,9 @@ src/
 - 当前模型开启 `is_multimodal` 时，输入区可选择图片；用户消息会转换为 `[{ type: "text" }, { type: "image_url" }]` 内容数组。
 - AI 返回内容中如果包含 Markdown 图片或兼容接口返回的 `image_url` part，前端会转成消息附件渲染。
 - AI 返回内容中如果包含 `<ai_card>`，前端会解析 `title`、`simple_html`、`full_html`、`css`，并由 `ChatMessageBubble` 以内嵌沙箱 iframe 渲染；简单版/完整版切换按钮放在 AI 回复操作区。
-- AI 返回内容中如果包含 `<scheduled_task>`，前端会解析为 `AgentScheduledTask` 并写入本地任务列表，用户可在设置页“计划任务”中继续管理。
+- AI 返回内容中如果包含 `<scheduled_task>`，`src/scheduledTasks/chatScheduledTasks.ts` 会解析为 `AgentScheduledTask` 并写入本地任务列表，用户可在设置页“计划任务”中继续管理。
 - 用户输入疑似计划任务时，聊天页会先调用 `agent_plan_scheduled_tasks` 专用规划器，让 AI 把自然语言转成结构化任务草案；前端校验通过后直接保存并回复创建结果，不再依赖普通聊天回复自觉输出 `<scheduled_task>`。
-- 对“几分钟后/几小时后/今天几点/明天几点提醒或告诉我”这类单次任务，`App.tsx` 仍保留本地兜底解析；重复任务和复杂任务优先走专用规划器。
+- 对“几分钟后/几小时后/今天几点/明天几点提醒或告诉我”这类单次任务，`src/scheduledTasks/chatScheduledTasks.ts` 保留本地兜底解析；重复任务和复杂任务优先走专用规划器。
 - 计划任务执行由 `src/ScheduledTaskRunner.tsx` 负责。它挂在应用入口路由下，每 15 秒检查一次到期任务，因此停留在聊天页或设置页都能执行。提醒类任务直接写入计划任务会话；AI 执行类任务会调用对应模型，必要时可处理 Tavily 或 Shell 工具调用，最终把结果写入该模型的“计划任务”会话。单次任务执行成功后标记完成，非单次调度执行成功后自动计算下一次执行时间并继续保持待执行。
 - 每条 AI 回复提供复制、朗读、显示原文和编辑按钮。
 - 朗读按钮优先使用 `message.tts_text`，没有朗读文本时回退到 `message.content`。
@@ -607,7 +609,8 @@ ASR 配置示例：
 
 - `src/modelConfig.ts` 的 `AgentConfig`、`AGENT_SKILLS`、`normalizeAgentMaxSteps()`。
 - `src/Settings.tsx` 的“Agent 设置”分类。
-- `src/App.tsx` 的 `runAgentQuickAction()`、`runAgentAutoShellAction()`、`runAgentAutoTavilyAction()`、`resolveAgentToolCallReply()`、`parseAgentQuickAction()`、`extractPageTextUrl()`、`extractUrlToOpen()`、`extractPathToOpen()`、`extractCopyText()`、`extractShellCommand()`、`extractShellToolCall()`、`extractTavilyToolCall()`、`stripAgentToolCalls()`、`formatShellResult()`、`buildShellToolContext()`、`buildTavilyToolContext()`。
+- `src/App.tsx` 的 `runAgentQuickAction()`、`runAgentAutoShellAction()`、`runAgentAutoTavilyAction()`、`resolveAgentToolCallReply()`。
+- `src/agent/chatAgentTools.ts` 的 `parseAgentQuickAction()`、`extractAgentToolCalls()`、`stripAgentToolCalls()`、`buildShellToolContext()`、`buildTavilyToolContext()`。
 - `src-tauri/src/config.rs` 的 `AgentConfig`。
 - `src-tauri/src/commands/agent.rs` 的 `preview_agent_capabilities`、`agent_fetch_url_text`、`agent_plan_shell_action`、`agent_run_shell`、`agent_plan_tavily_search`、`agent_tavily_search`。
 - `src-tauri/src/lib.rs` 的 command 注册。
@@ -619,8 +622,10 @@ ASR 配置示例：
 优先看：
 
 - `src/modelConfig.ts` 的 `AgentScheduledTask`、`loadAgentScheduledTasks()`、`saveAgentScheduledTasks()`。
-- `src/Settings.tsx` 的“计划任务”分类和 `ScheduledTaskSettingsPanel`。
-- `src/App.tsx` 的 `runAgentScheduledTaskCreation()`、`createScheduledTasksFromPlan()`、`createScheduledTasksFromReply()`。
+- `src/Settings.tsx` 的“计划任务”分类入口。
+- `src/settings/ScheduledTaskSettingsPanel.tsx` 的计划任务表单和任务列表 UI。
+- `src/App.tsx` 的 `runAgentScheduledTaskCreation()`。
+- `src/scheduledTasks/chatScheduledTasks.ts` 的 `createScheduledTasksFromPlan()`、`createScheduledTasksFromReply()`、`createScheduledTasksFromUserRequest()`。
 - `src/ScheduledTaskRunner.tsx` 的到点扫描、执行、写入计划任务会话和重复任务续排逻辑。
 - `src-tauri/src/commands/agent.rs` 的 `agent_plan_scheduled_tasks`，负责把自然语言任务请求规划成结构化任务草案。
 - `src-tauri/prompts/chat_response_guide.md` 的 `<scheduled_task>` 输出规范。

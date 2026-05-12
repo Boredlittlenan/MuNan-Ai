@@ -4,14 +4,17 @@
 
 - `src/App.tsx`: chat workspace UI and conversation state.
 - `src/App.tsx`: also handles multimodal image attachments for models marked with `is_multimodal`.
-- `src/App.tsx`: renders AI HTML/CSS cards from `<ai_card>` blocks, supports simple/full card switching, and parses `<scheduled_task>` blocks from AI replies.
+- `src/App.tsx`: renders AI HTML/CSS cards from `<ai_card>` blocks and coordinates chat send/receive flow.
+- `src/agent/chatAgentTools.ts`: parses quick Agent actions and `<tool_call>` blocks, and formats Shell/Tavily tool results for model follow-up.
+- `src/scheduledTasks/chatScheduledTasks.ts`: parses `<scheduled_task>` blocks, handles chat-side scheduled task planning helpers, and formats scheduled task notices.
 - `src/ScheduledTaskRunner.tsx`: app-level scheduled task runner mounted under the router, so due tasks run while the app is open regardless of whether the user is on the chat page or settings page.
-- `src/Settings.tsx`: settings UI, including model configuration, the per-model multimodal toggle, Agent controls, usage charts, and the standalone scheduled task section.
+- `src/Settings.tsx`: settings UI, including model configuration, the per-model multimodal toggle, Agent controls, and usage charts.
+- `src/settings/ScheduledTaskSettingsPanel.tsx`: standalone scheduled task settings panel and schedule form helpers.
 - `src/modelConfig.ts`: shared frontend model metadata, storage helpers, and config types.
-- Agent settings live in `src/Settings.tsx` and `src/modelConfig.ts`; they manage feature toggles and a skill allowlist. `src/App.tsx` currently includes quick actions for opening URLs/paths, reading webpage text, copying text, and letting the active AI model plan Shell commands from user intent.
+- Agent settings live in `src/Settings.tsx` and `src/modelConfig.ts`; they manage feature toggles and a skill allowlist. Chat-side Agent text parsing lives in `src/agent/chatAgentTools.ts`.
 - AI replies that contain `<tool_call><function=execute_shell>...` or `<function=tavily_search>...` are intercepted by the chat page, executed through Tauri Agent commands, stripped from the visible message, and then fed back into the model for a final user-facing answer.
 - AI replies that contain `<scheduled_task>...` are parsed into local scheduled tasks. The schedule is driven by `schedule_mode` (`once`, `daily`, `weekly`, `monthly`, `yearly`, `custom_days`). The app-level scheduler checks due tasks, writes results into a per-model "计划任务" conversation, then marks one-time tasks as done or advances repeating modes to the next run.
-- For one-time chat requests such as "in one minute" or "tomorrow at 8", `src/App.tsx` also has a deterministic local fallback parser. It creates a real task from the user's text if the model only claims a task was created but omits `<scheduled_task>`.
+- For one-time chat requests such as "in one minute" or "tomorrow at 8", `src/scheduledTasks/chatScheduledTasks.ts` also has a deterministic local fallback parser. It creates a real task from the user's text if the model only claims a task was created but omits `<scheduled_task>`.
 - Natural-language scheduled task creation now uses `agent_plan_scheduled_tasks` before the normal chat response. The dedicated planner lets the active model understand arbitrary reminder/recurrence/task wording, while the frontend validates and persists the resulting task data.
 - Conversation history loads from Tauri commands and is persisted in backend SQLite, including message image attachment metadata/data and token usage statistics; `localStorage` is only used for lightweight UI state and legacy migration.
 - Scheduled tasks are stored in `localStorage` under `agentScheduledTasks` and synchronized across the settings page, chat page, and app-level runner with custom browser events.
