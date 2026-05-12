@@ -1,6 +1,7 @@
 use crate::ai::types::ChatMessage;
 use crate::config::{load_config, AgentConfig};
 use chrono::Local;
+use serde::de::Error as DeError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -61,19 +62,32 @@ pub struct AgentScheduledTaskPlanRequest {
     pub user_text: String,
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
+    #[serde(default, alias = "existingTasks")]
+    pub existing_tasks: Vec<AgentScheduledTaskExistingTask>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AgentScheduledTaskPlan {
+    #[serde(default)]
     pub should_create: bool,
     #[serde(default)]
     pub tasks: Vec<AgentScheduledTaskPlanItem>,
+    #[serde(default)]
+    pub should_update: bool,
+    #[serde(default)]
+    pub updates: Vec<AgentScheduledTaskPlanItem>,
+    #[serde(default)]
+    pub should_delete: bool,
+    #[serde(default)]
+    pub delete_ids: Vec<String>,
     #[serde(default)]
     pub reason: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct AgentScheduledTaskPlanItem {
+    #[serde(default)]
+    pub id: String,
     #[serde(default)]
     pub title: String,
     #[serde(default)]
@@ -82,7 +96,7 @@ pub struct AgentScheduledTaskPlanItem {
     pub kind: String,
     #[serde(default)]
     pub schedule_mode: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_or_number")]
     pub scheduled_at: String,
     #[serde(default)]
     pub time_of_day: String,
@@ -96,6 +110,52 @@ pub struct AgentScheduledTaskPlanItem {
     pub year_month_day: Option<u8>,
     #[serde(default)]
     pub custom_interval_days: Option<u32>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub model: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct AgentScheduledTaskExistingTask {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub prompt: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub schedule_mode: String,
+    #[serde(default)]
+    pub scheduled_at: i64,
+    #[serde(default)]
+    pub time_of_day: String,
+    #[serde(default)]
+    pub weekdays: Vec<u8>,
+    #[serde(default)]
+    pub month_days: Vec<u8>,
+    #[serde(default)]
+    pub year_month: Option<u8>,
+    #[serde(default)]
+    pub year_month_day: Option<u8>,
+    #[serde(default)]
+    pub custom_interval_days: Option<u32>,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub created_at: i64,
+    #[serde(default)]
+    pub updated_at: i64,
+    #[serde(default)]
+    pub last_run_at: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -336,6 +396,10 @@ pub async fn agent_plan_scheduled_tasks(
         return Ok(AgentScheduledTaskPlan {
             should_create: false,
             tasks: Vec::new(),
+            should_update: false,
+            updates: Vec::new(),
+            should_delete: false,
+            delete_ids: Vec::new(),
             reason: "用户输入为空。".into(),
         });
     }
@@ -343,22 +407,31 @@ pub async fn agent_plan_scheduled_tasks(
     let config = load_config(&app)?;
     let now = Local::now();
     let recent_context = compact_agent_context(&request.messages, 12);
+    let existing_tasks =
+        serde_json::to_string_pretty(&request.existing_tasks).unwrap_or_else(|_| "[]".to_string());
     let planner_messages = vec![
         ChatMessage::text(
             "system",
             format!(
-                "你是 MuNan AI 的计划任务规划器。你只负责把用户关于未来提醒、闹钟、日程提醒、周期任务、到点自动查询或到点自动执行的请求，转换成结构化 JSON。\n\
+                "你是 MuNan AI 的计划任务变更规划器。你只负责把用户关于未来提醒、闹钟、日程提醒、周期任务、到点自动查询或到点自动执行的请求，转换成结构化 JSON。\n\
 当前本地时间：{}；ISO：{}。\n\
-输出必须是纯 JSON，不能有 Markdown，格式：{{\"should_create\":true|false,\"tasks\":[...],\"reason\":\"...\"}}。\n\
-如果用户不是在创建未来任务，should_create=false，tasks=[]。\n\
-如果用户要求未来某个时间提醒、告诉、通知、叫醒、执行、查询、播报、汇报、总结、整理，就 should_create=true。\n\
-每个 task 字段：title、prompt、kind、schedule_mode、scheduled_at、time_of_day、weekdays、month_day、year_month、year_month_day、custom_interval_days。\n\
+输出必须是纯 JSON，不能有 Markdown，格式：{{\"should_create\":true|false,\"tasks\":[...],\"should_update\":true|false,\"updates\":[...],\"should_delete\":true|false,\"delete_ids\":[...],\"reason\":\"...\"}}。\n\
+如果用户不是在创建、修改、暂停、恢复或删除计划任务，三个 should_* 都为 false，数组都为空。\n\
+如果用户要求新增未来某个时间提醒、告诉、通知、叫醒、执行、查询、播报、汇报、总结、整理，就 should_create=true。\n\
+如果用户要求修改已有任务，比如改时间、改周期、改内容、改模型、暂停或恢复，就 should_update=true，updates 里必须写匹配到的已有任务 id，并输出修改后的完整任务字段。暂停任务时 enabled=false；恢复/启用任务时 enabled=true。\n\
+如果用户要求删除或取消已有任务，就 should_delete=true，delete_ids 里只写匹配到的已有任务 id。\n\
+如果用户使用省略表达，比如“改成每周一到周六”“换成每周一到周五”“改到早上8点”，要结合最近对话和现有计划任务判断用户是在修改刚创建或刚提到的任务；如果只有一个强相关任务，直接 update 它，不要新建替代任务。\n\
+当存在多个同名或同类任务时，优先选择最近对话刚创建/刚提到的任务；其次选择 updated_at 或 created_at 最大的任务。不确定时不要创建新任务，reason 说明需要用户指定任务。\n\
+每个 task/update 字段：id、title、prompt、kind、schedule_mode、scheduled_at、time_of_day、weekdays、month_day、year_month、year_month_day、custom_interval_days、enabled、model。\n\
+新建任务的 model 可以留空，表示沿用当前聊天模型；修改任务时如果用户没要求改模型，就沿用现有任务 model。\n\
 kind 只能是 reminder 或 ai_prompt。普通提醒/闹钟用 reminder；需要到点后查询天气、联网搜索、总结、整理、生成内容、执行 AI 判断的任务用 ai_prompt。\n\
 schedule_mode 只能是 once、daily、weekly、monthly、yearly、custom_days。\n\
 once 必须写 scheduled_at，使用带本地时区的 ISO 时间；daily 只写 time_of_day；weekly 写 weekdays 和 time_of_day，weekdays 用 1-7 表示周一到周日；monthly 写 month_day 和 time_of_day；yearly 写 year_month、year_month_day 和 time_of_day；custom_days 写 custom_interval_days 和 time_of_day。\n\
 中文时间要按当前本地时间换算：一分钟后、三小时后、明早、今晚、以后每天早晨 9 点、每周一三五下午 6 点、每月 1 号、每年 5 月 1 日、每隔 3 天等都要转换。\n\
 不要编造用户没说的地点、联系人或细节；可以把缺失细节保留在 prompt 里让到点执行时再根据上下文处理。\n\
-示例：用户说“以后每天早晨9告诉我当天天气”，输出 daily、time_of_day=09:00、kind=ai_prompt、prompt=到点后查询当天天气并告知用户。",
+选择已有任务时要根据 id、title、prompt、schedule_mode、time_of_day、source 等综合匹配；不确定是哪一个任务时不要更新或删除，reason 说明需要用户说清楚。\n\
+示例：用户说“以后每天早晨9告诉我当天天气”，输出 create daily、time_of_day=09:00、kind=ai_prompt、prompt=到点后查询当天天气并告知用户。\n\
+示例：用户说“把天气提醒改到早上8点”，从已有任务中找到天气提醒，输出 update，保留原 id，time_of_day=08:00。",
                 now.format("%Y-%m-%d %H:%M:%S %:z"),
                 now.to_rfc3339()
             ),
@@ -366,8 +439,8 @@ once 必须写 scheduled_at，使用带本地时区的 ISO 时间；daily 只写
         ChatMessage::text(
             "user",
             format!(
-                "最近对话：\n{}\n\n用户最新需求：\n{}\n\n请规划计划任务并返回 JSON。",
-                recent_context, user_text
+                "最近对话：\n{}\n\n现有计划任务 JSON：\n{}\n\n用户最新需求：\n{}\n\n请规划计划任务变更并返回 JSON。",
+                recent_context, existing_tasks, user_text
             ),
         ),
     ];
@@ -754,24 +827,76 @@ fn parse_scheduled_task_plan(raw: &str) -> Result<AgentScheduledTaskPlan, String
 
     plan.reason = plan.reason.trim().to_string();
     for task in &mut plan.tasks {
+        task.id = task.id.trim().to_string();
         task.title = task.title.trim().to_string();
         task.prompt = task.prompt.trim().to_string();
         task.kind = task.kind.trim().to_lowercase();
         task.schedule_mode = task.schedule_mode.trim().to_lowercase();
         task.scheduled_at = task.scheduled_at.trim().to_string();
         task.time_of_day = task.time_of_day.trim().to_string();
+        task.model = task.model.trim().to_string();
     }
+    for task in &mut plan.updates {
+        task.id = task.id.trim().to_string();
+        task.title = task.title.trim().to_string();
+        task.prompt = task.prompt.trim().to_string();
+        task.kind = task.kind.trim().to_lowercase();
+        task.schedule_mode = task.schedule_mode.trim().to_lowercase();
+        task.scheduled_at = task.scheduled_at.trim().to_string();
+        task.time_of_day = task.time_of_day.trim().to_string();
+        task.model = task.model.trim().to_string();
+    }
+    plan.delete_ids = plan
+        .delete_ids
+        .into_iter()
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect();
 
     plan.tasks.retain(|task| {
         !task.title.is_empty() && !task.prompt.is_empty() && !task.schedule_mode.is_empty()
     });
+    plan.updates.retain(|task| {
+        !task.id.is_empty()
+            && !task.title.is_empty()
+            && !task.prompt.is_empty()
+            && !task.schedule_mode.is_empty()
+    });
 
     if plan.should_create && plan.tasks.is_empty() {
         plan.should_create = false;
-        plan.reason = "模型判断需要创建计划任务，但没有给出有效任务。".into();
+        plan.reason = "模型判断需要创建计划任务，但没有给出有效新任务。".into();
+    }
+    if plan.should_update && plan.updates.is_empty() {
+        plan.should_update = false;
+        if plan.reason.is_empty() {
+            plan.reason = "模型判断需要修改计划任务，但没有给出有效更新。".into();
+        }
+    }
+    if plan.should_delete && plan.delete_ids.is_empty() {
+        plan.should_delete = false;
+        if plan.reason.is_empty() {
+            plan.reason = "模型判断需要删除计划任务，但没有给出任务 id。".into();
+        }
     }
 
     Ok(plan)
+}
+
+fn deserialize_string_or_number<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::String(text) => Ok(text),
+        Value::Number(number) => Ok(number.to_string()),
+        Value::Null => Ok(String::new()),
+        other => Err(D::Error::custom(format!(
+            "expected string, number, or null, got {}",
+            other
+        ))),
+    }
 }
 
 fn normalize_tavily_max_results(value: u32) -> u32 {

@@ -476,6 +476,27 @@
   border: 1px solid var(--line-soft);
 }
 
+.agent-schedule-edit-banner {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid rgba(29, 114, 243, 0.22);
+  border-radius: var(--radius-md);
+  color: #0f4bb8;
+  background: rgba(239, 246, 255, 0.92);
+  font-size: 13px;
+}
+
+.agent-schedule-edit-banner span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
 .agent-schedule-form__field {
   display: grid;
   gap: 8px;
@@ -526,6 +547,8 @@
   grid-column: 1 / -1;
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .agent-schedule-list {
@@ -548,6 +571,11 @@
 .agent-schedule-card.is-enabled {
   background: rgba(239, 246, 255, 0.84);
   border-color: rgba(29, 114, 243, 0.22);
+}
+
+.agent-schedule-card.is-editing {
+  border-color: rgba(29, 114, 243, 0.44);
+  box-shadow: 0 14px 34px rgba(29, 114, 243, 0.12);
 }
 
 .agent-schedule-card__body {

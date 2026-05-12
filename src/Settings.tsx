@@ -12,6 +12,7 @@ import {
   IoClose,
   IoCloudUploadOutline,
   IoCubeOutline,
+  IoCreateOutline,
   IoDownloadOutline,
   IoEyeOffOutline,
   IoEyeOutline,
@@ -199,6 +200,7 @@ function Settings() {
   const [scheduleForm, setScheduleForm] = useState<AgentScheduleForm>(() =>
     createDefaultAgentScheduleForm(loadPreferredModel())
   );
+  const [editingScheduledTaskId, setEditingScheduledTaskId] = useState<string | null>(null);
   const [scheduleError, setScheduleError] = useState("");
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -489,7 +491,7 @@ function Settings() {
     }));
   };
 
-  const addScheduledTask = () => {
+  const submitScheduledTask = () => {
     const title = scheduleForm.title.trim();
     const prompt = scheduleForm.prompt.trim();
     const rawScheduledAt = new Date(scheduleForm.scheduledAt).getTime();
@@ -562,8 +564,11 @@ function Settings() {
       return;
     }
 
+    const editingTask = editingScheduledTaskId
+      ? scheduledTasks.find((task) => task.id === editingScheduledTaskId) ?? null
+      : null;
     const nextTask: AgentScheduledTask = {
-      id: createAgentScheduledTaskId(),
+      id: editingTask?.id ?? createAgentScheduledTaskId(),
       title,
       prompt,
       scheduled_at: scheduledAt,
@@ -585,9 +590,11 @@ function Settings() {
         scheduleForm.scheduleMode === "custom_days" ? customIntervalDays : undefined,
       status: "pending",
       model: scheduleForm.model,
-      source: "manual",
-      created_at: now,
+      source: editingTask?.source ?? "manual",
+      created_at: editingTask?.created_at ?? now,
       updated_at: now,
+      last_run_at: editingTask?.last_run_at,
+      last_error: undefined,
     };
     const initialRunAt =
       scheduleForm.scheduleMode === "once"
@@ -601,7 +608,12 @@ function Settings() {
 
     nextTask.scheduled_at = initialRunAt;
 
-    saveScheduledTaskList([...scheduledTasks, nextTask], "计划任务已添加。");
+    const nextTasks = editingTask
+      ? scheduledTasks.map((task) => (task.id === editingTask.id ? nextTask : task))
+      : [...scheduledTasks, nextTask];
+
+    saveScheduledTaskList(nextTasks, editingTask ? "计划任务已更新。" : "计划任务已添加。");
+    setEditingScheduledTaskId(null);
     setScheduleForm((current) => ({
       ...createDefaultAgentScheduleForm(current.model),
       kind: current.kind,
@@ -613,6 +625,20 @@ function Settings() {
       yearMonthDay: current.yearMonthDay,
       customIntervalDays: current.customIntervalDays,
     }));
+  };
+
+  const editScheduledTask = (task: AgentScheduledTask) => {
+    setEditingScheduledTaskId(task.id);
+    setScheduleError("");
+    setError("");
+    setScheduleForm(scheduleFormFromTask(task));
+    setMessage(`正在编辑计划任务：${task.title}`);
+  };
+
+  const cancelScheduledTaskEdit = () => {
+    setEditingScheduledTaskId(null);
+    setScheduleError("");
+    setScheduleForm((current) => createDefaultAgentScheduleForm(current.model));
   };
 
   const toggleScheduledTask = (taskId: string) => {
@@ -653,6 +679,10 @@ function Settings() {
       scheduledTasks.filter((task) => task.id !== taskId),
       "计划任务已删除。"
     );
+
+    if (editingScheduledTaskId === taskId) {
+      cancelScheduledTaskEdit();
+    }
   };
 
   const isPasswordVisible = (field: string) => visiblePasswordFields.includes(field);
@@ -1659,9 +1689,12 @@ function Settings() {
                     modelOptions={modelOptions}
                     scheduleError={scheduleError}
                     scheduledTasks={scheduledTasks}
+                    editingScheduledTaskId={editingScheduledTaskId}
                     config={config}
                     updateScheduleFormField={updateScheduleFormField}
-                    addScheduledTask={addScheduledTask}
+                    submitScheduledTask={submitScheduledTask}
+                    editScheduledTask={editScheduledTask}
+                    cancelScheduledTaskEdit={cancelScheduledTaskEdit}
                     toggleScheduledTask={toggleScheduledTask}
                     resetScheduledTask={resetScheduledTask}
                     deleteScheduledTask={deleteScheduledTask}
@@ -2289,12 +2322,15 @@ type ScheduledTaskSettingsPanelProps = {
   modelOptions: ReturnType<typeof getModelOptions>;
   scheduleError: string;
   scheduledTasks: AgentScheduledTask[];
+  editingScheduledTaskId: string | null;
   config: AppConfig;
   updateScheduleFormField: <K extends keyof AgentScheduleForm>(
     field: K,
     value: AgentScheduleForm[K]
   ) => void;
-  addScheduledTask: () => void;
+  submitScheduledTask: () => void;
+  editScheduledTask: (task: AgentScheduledTask) => void;
+  cancelScheduledTaskEdit: () => void;
   toggleScheduledTask: (taskId: string) => void;
   resetScheduledTask: (taskId: string) => void;
   deleteScheduledTask: (taskId: string) => void;
@@ -2306,13 +2342,20 @@ function ScheduledTaskSettingsPanel({
   modelOptions,
   scheduleError,
   scheduledTasks,
+  editingScheduledTaskId,
   config,
   updateScheduleFormField,
-  addScheduledTask,
+  submitScheduledTask,
+  editScheduledTask,
+  cancelScheduledTaskEdit,
   toggleScheduledTask,
   resetScheduledTask,
   deleteScheduledTask,
 }: ScheduledTaskSettingsPanelProps) {
+  const editingTask = editingScheduledTaskId
+    ? scheduledTasks.find((task) => task.id === editingScheduledTaskId)
+    : null;
+
   return (
     <div className="settings-field settings-field--wide agent-schedule-panel">
       <div className="settings-field__header">
@@ -2320,7 +2363,7 @@ function ScheduledTaskSettingsPanel({
           <IoAlarmOutline size={20} />
           <div>
             <p className="section-kicker">Schedule</p>
-            <h3>计划任务</h3>
+            <h3>{editingTask ? "编辑计划任务" : "计划任务"}</h3>
           </div>
         </div>
         <span className="status-chip">
@@ -2332,6 +2375,16 @@ function ScheduledTaskSettingsPanel({
       </p>
 
       <div className="agent-schedule-form">
+        {editingTask && (
+          <div className="agent-schedule-edit-banner">
+            <span>正在编辑：{editingTask.title}</span>
+            <button type="button" className="ghost-button" onClick={cancelScheduledTaskEdit}>
+              <IoClose size={16} />
+              取消编辑
+            </button>
+          </div>
+        )}
+
         <div className="agent-schedule-form__field">
           <label htmlFor="agent-schedule-title">任务名称</label>
           <input
@@ -2536,9 +2589,15 @@ function ScheduledTaskSettingsPanel({
         </div>
 
         <div className="agent-schedule-form__actions">
-          <button type="button" className="primary-button" onClick={addScheduledTask}>
-            <IoAdd size={18} />
-            添加计划任务
+          {editingTask && (
+            <button type="button" className="ghost-button" onClick={cancelScheduledTaskEdit}>
+              <IoClose size={18} />
+              取消
+            </button>
+          )}
+          <button type="button" className="primary-button" onClick={submitScheduledTask}>
+            {editingTask ? <IoSave size={18} /> : <IoAdd size={18} />}
+            {editingTask ? "保存修改" : "添加计划任务"}
           </button>
         </div>
       </div>
@@ -2555,7 +2614,7 @@ function ScheduledTaskSettingsPanel({
             <article
               className={`agent-schedule-card ${
                 task.enabled && task.status === "pending" ? "is-enabled" : ""
-              }`}
+              } ${task.id === editingScheduledTaskId ? "is-editing" : ""}`}
               key={task.id}
             >
               <div className="agent-schedule-card__body">
@@ -2585,6 +2644,14 @@ function ScheduledTaskSettingsPanel({
               </div>
 
               <div className="agent-schedule-card__actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => editScheduledTask(task)}
+                >
+                  <IoCreateOutline size={16} />
+                  编辑
+                </button>
                 {task.status === "pending" ? (
                   <label className="settings-switch" title={task.enabled ? "暂停任务" : "启用任务"}>
                     <input
@@ -2728,6 +2795,30 @@ function createDefaultAgentScheduleForm(model: ModelType): AgentScheduleForm {
     yearMonthDay: String(new Date(nextHour).getDate()),
     customIntervalDays: "2",
     model,
+  };
+}
+
+function scheduleFormFromTask(task: AgentScheduledTask): AgentScheduleForm {
+  const fallbackDate = new Date(task.scheduled_at);
+  const monthDay = task.month_days?.[0] ?? fallbackDate.getDate();
+  const yearMonth = task.year_month ?? fallbackDate.getMonth() + 1;
+  const yearMonthDay = task.year_month_day ?? fallbackDate.getDate();
+
+  return {
+    title: task.title,
+    prompt: task.prompt,
+    scheduledAt: toLocalDateTimeInputValue(task.scheduled_at),
+    timeOfDay: task.time_of_day ?? toLocalTimeInputValue(task.scheduled_at),
+    kind: task.kind,
+    scheduleMode: task.schedule_mode,
+    weekdays: task.weekdays?.length
+      ? task.weekdays
+      : [getChineseWeekdayForSettings(task.scheduled_at)],
+    monthDay: String(monthDay),
+    yearMonth: String(yearMonth),
+    yearMonthDay: String(yearMonthDay),
+    customIntervalDays: String(task.custom_interval_days ?? 2),
+    model: task.model,
   };
 }
 

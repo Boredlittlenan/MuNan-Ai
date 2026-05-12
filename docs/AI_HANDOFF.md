@@ -25,7 +25,7 @@ MuNan AI 是一个基于 Tauri 2 + React + TypeScript + Rust 的桌面端多模�
 - 双文本回复：AI 回复会拆成用户可见文本和 TTS 朗读文本，朗读文本可携带风格标签与音频标签。
 - AI 人设：设置页“基础配置”可编辑用户名和后台人设提示词；人设有独立开关，开启时才作为 system message 注入。
 - Agent 设置与快速动作：设置页新增“Agent 设置”，可管理 Agent 总开关、浏览器操作、系统操作、Shell 执行、Tavily 联网搜索、高风险确认、单次步数和技能白名单；聊天页会先识别 Agent 指令，当前可执行打开网页、读取网页文本、打开本地路径、复制文本，并可由 AI 根据对话需求自动规划 Shell 命令或 Tavily 搜索。
-- 计划任务：设置页新增独立“计划任务”设置选项，可手动创建单次、每日、每周、每月、每年和自定义天数任务；聊天页可解析 `<scheduled_task>` 自动创建任务，并在应用打开时到点执行。
+- 计划任务：设置页新增独立“计划任务”设置选项，可手动创建和编辑单次、每日、每周、每月、每年和自定义天数任务；聊天页可通过专用规划器创建、修改、暂停/恢复或删除任务，并在应用打开时到点执行。
 - 响应式布局：聊天页和设置页已适配 PC、平板和手机。手机端聊天页使用可折叠模型/会话侧边栏，消息区独立滚动，输入区固定在底部。
 
 ## 2. 技术栈
@@ -170,7 +170,7 @@ src/
 - AI 返回内容中如果包含 Markdown 图片或兼容接口返回的 `image_url` part，前端会转成消息附件渲染。
 - AI 返回内容中如果包含 `<ai_card>`，前端会解析 `title`、`simple_html`、`full_html`、`css`，并由 `ChatMessageBubble` 以内嵌沙箱 iframe 渲染；简单版/完整版切换按钮放在 AI 回复操作区。
 - AI 返回内容中如果包含 `<scheduled_task>`，前端会解析为 `AgentScheduledTask` 并写入本地任务列表，用户可在设置页“计划任务”中继续管理。
-- 用户输入疑似计划任务时，聊天页会先调用 `agent_plan_scheduled_tasks` 专用规划器，让 AI 把自然语言转成结构化任务草案；前端校验通过后直接保存并回复创建结果，不再依赖普通聊天回复自觉输出 `<scheduled_task>`。
+- 用户输入疑似计划任务时，聊天页会先调用 `agent_plan_scheduled_tasks` 专用规划器，并把现有计划任务上下文传给模型，让 AI 把自然语言转成创建、更新或删除草案；前端校验通过后直接保存并回复变更结果，不再依赖普通聊天回复自觉输出 `<scheduled_task>`。
 - 对“几分钟后/几小时后/今天几点/明天几点提醒或告诉我”这类单次任务，`App.tsx` 仍保留本地兜底解析；重复任务和复杂任务优先走专用规划器。
 - 计划任务执行由 `src/ScheduledTaskRunner.tsx` 负责。它挂在应用入口路由下，每 15 秒检查一次到期任务，因此停留在聊天页或设置页都能执行。提醒类任务直接写入计划任务会话；AI 执行类任务会调用对应模型，必要时可处理 Tavily 或 Shell 工具调用，最终把结果写入该模型的“计划任务”会话。单次任务执行成功后标记完成，非单次调度执行成功后自动计算下一次执行时间并继续保持待执行。
 - 每条 AI 回复提供复制、朗读、显示原文和编辑按钮。
@@ -221,7 +221,7 @@ App.tsx sendMessage()
 - 用量统计独立为设置分类，展示筛选范围、今日、本月、明细数量、线性趋势图、每日柱形图和各模型占比饼图。
 - 用量统计页可设置明细保存时间，0 表示永久保存，7-3650 表示自动清理更早明细。
 - Agent 设置页可配置 Agent 总开关、浏览器/系统/Shell/Tavily 能力开关、Tavily API Key、Tavily 最大结果数、高风险确认策略、单次任务步数和技能白名单，并通过 `preview_agent_capabilities` 检查当前表单会启用哪些技能。
-- 计划任务页可创建、暂停、删除和重置计划任务。调度方式直接选择单次、每日、每周、每月、每年或自定义天数；表单会按调度方式切换完整日期时间、时间、星期多选、月日期、年月日或间隔天数字段。任务类型分为提醒和 AI 执行；AI 执行会按任务绑定的模型到点调用模型并把结果写入计划任务会话。
+- 计划任务页可创建、编辑、暂停、删除和重置计划任务。调度方式直接选择单次、每日、每周、每月、每年或自定义天数；表单会按调度方式切换完整日期时间、时间、星期多选、月日期、年月日或间隔天数字段。任务类型分为提醒和 AI 执行；AI 执行会按任务绑定的模型到点调用模型并把结果写入计划任务会话。
 - 可在模型导航中添加自定义供应商，自定义供应商按 OpenAI-compatible 接口调用。
 - 编辑当前供应商的 `base_url`、`api_key`、`model`、`is_multimodal`。
 - 维护自定义模型列表。
@@ -620,7 +620,7 @@ ASR 配置示例：
 
 - `src/modelConfig.ts` 的 `AgentScheduledTask`、`loadAgentScheduledTasks()`、`saveAgentScheduledTasks()`。
 - `src/Settings.tsx` 的“计划任务”分类和 `ScheduledTaskSettingsPanel`。
-- `src/App.tsx` 的 `runAgentScheduledTaskCreation()`、`createScheduledTasksFromPlan()`、`createScheduledTasksFromReply()`。
+- `src/App.tsx` 的 `runAgentScheduledTaskCreation()`、`applyScheduledTaskPlan()`、`createScheduledTasksFromPlan()`、`createScheduledTasksFromReply()`。
 - `src/ScheduledTaskRunner.tsx` 的到点扫描、执行、写入计划任务会话和重复任务续排逻辑。
 - `src-tauri/src/commands/agent.rs` 的 `agent_plan_scheduled_tasks`，负责把自然语言任务请求规划成结构化任务草案。
 - `src-tauri/prompts/chat_response_guide.md` 的 `<scheduled_task>` 输出规范。
@@ -679,7 +679,7 @@ pnpm tauri dev
 - 多模态开关关闭时，图片按钮禁用；开启后可添加图片、预览、移除，并随消息保存到 SQLite。
 - 支持视觉输入的供应商应能收到 `image_url` 消息；返回 Markdown 图片时聊天气泡应直接显示图片。
 - AI 回复包含 `<ai_card>` 时，聊天气泡应显示卡片而不是原始标签，简单/完整切换后气泡宽高应随内容恢复。
-- 设置页“计划任务”应能新增、暂停、删除和重置任务；调度方式切换后字段应符合单次/每日/每周/每月/每年/自定义天数的不同要求；聊天里要求未来提醒时应自动创建任务。
+- 设置页“计划任务”应能新增、编辑、暂停、删除和重置任务；调度方式切换后字段应符合单次/每日/每周/每月/每年/自定义天数的不同要求；聊天里要求未来提醒时应自动创建任务，要求修改/取消已有任务时应真实更新本地任务列表。
 - 到点计划任务应写入对应模型的“计划任务”会话；应用关闭期间不会后台执行。
 - 成功聊天后，设置页用量统计能看到请求次数；供应商返回 usage 时能看到 token 数增长。
 - 日期筛选后，线性图、柱形图和模型占比饼图应按筛选范围更新。
