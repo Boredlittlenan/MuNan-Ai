@@ -4,14 +4,17 @@
 
 - `src/App.tsx`: chat workspace UI and conversation state.
 - `src/App.tsx`: also handles multimodal image attachments for models marked with `is_multimodal`.
-- `src/App.tsx`: renders AI HTML/CSS cards from `<ai_card>` blocks, supports simple/full card switching, and runs due scheduled tasks while the app is open.
+- `src/App.tsx`: renders AI HTML/CSS cards from `<ai_card>` blocks, supports simple/full card switching, and parses `<scheduled_task>` blocks from AI replies.
+- `src/ScheduledTaskRunner.tsx`: app-level scheduled task runner mounted under the router, so due tasks run while the app is open regardless of whether the user is on the chat page or settings page.
 - `src/Settings.tsx`: settings UI, including model configuration, the per-model multimodal toggle, Agent controls, usage charts, and the standalone scheduled task section.
 - `src/modelConfig.ts`: shared frontend model metadata, storage helpers, and config types.
 - Agent settings live in `src/Settings.tsx` and `src/modelConfig.ts`; they manage feature toggles and a skill allowlist. `src/App.tsx` currently includes quick actions for opening URLs/paths, reading webpage text, copying text, and letting the active AI model plan Shell commands from user intent.
 - AI replies that contain `<tool_call><function=execute_shell>...` or `<function=tavily_search>...` are intercepted by the chat page, executed through Tauri Agent commands, stripped from the visible message, and then fed back into the model for a final user-facing answer.
-- AI replies that contain `<scheduled_task>...` are parsed into local scheduled tasks. Tasks can be one-time or recurring. The scheduler checks due tasks in the chat page, writes results into a per-model "计划任务" conversation, then marks one-time tasks as done or advances recurring tasks to the next run.
+- AI replies that contain `<scheduled_task>...` are parsed into local scheduled tasks. The schedule is driven by `schedule_mode` (`once`, `daily`, `weekly`, `monthly`, `yearly`, `custom_days`). The app-level scheduler checks due tasks, writes results into a per-model "计划任务" conversation, then marks one-time tasks as done or advances repeating modes to the next run.
+- For one-time chat requests such as "in one minute" or "tomorrow at 8", `src/App.tsx` also has a deterministic local fallback parser. It creates a real task from the user's text if the model only claims a task was created but omits `<scheduled_task>`.
+- Natural-language scheduled task creation now uses `agent_plan_scheduled_tasks` before the normal chat response. The dedicated planner lets the active model understand arbitrary reminder/recurrence/task wording, while the frontend validates and persists the resulting task data.
 - Conversation history loads from Tauri commands and is persisted in backend SQLite, including message image attachment metadata/data and token usage statistics; `localStorage` is only used for lightweight UI state and legacy migration.
-- Scheduled tasks are stored in `localStorage` under `agentScheduledTasks` and synchronized across the settings page and chat page with a custom browser event.
+- Scheduled tasks are stored in `localStorage` under `agentScheduledTasks` and synchronized across the settings page, chat page, and app-level runner with custom browser events.
 - `src/styles/`: page and shared styles.
 
 ## Tauri Backend
@@ -40,7 +43,7 @@
 - `src-tauri/prompts/chat_response_guide.md` requires every model response to include `<display_text>` and `<tts_text>`.
 - `<ai_card>` blocks live inside `display_text` and include `title`, `simple_html`, `full_html`, and shared `css`. The frontend strips the raw block from Markdown and renders it inside a sandboxed iframe.
 - `<tool_call>` blocks request real Agent actions and are not shown directly to the user.
-- `<scheduled_task>` blocks create local scheduled tasks. `scheduled_at` must be an explicit ISO datetime, and Rust injects the current local time into the system prompt so the model can resolve relative times. Optional recurrence fields are `schedule_type`, `recurrence`, and `custom_interval_days`.
+- `<scheduled_task>` blocks create local scheduled tasks. Use `schedule_mode` directly: `once` requires an explicit ISO `scheduled_at`; `daily` uses `time_of_day`; `weekly` uses `weekdays` plus `time_of_day`; `monthly` uses `month_day` plus `time_of_day`; `yearly` uses `year_month`, `year_month_day`, and `time_of_day`; `custom_days` uses `custom_interval_days` plus `time_of_day`. Rust injects the current local time into the system prompt so the model can resolve relative times.
 
 ## Adding ASR/TTS Later
 

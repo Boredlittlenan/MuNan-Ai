@@ -141,8 +141,9 @@ fn with_response_guidance(
     guided_messages.push(ChatMessage {
         role: "system".into(),
         content: serde_json::Value::String(format!(
-            "当前本地时间：{}。当用户使用今天、明天、下周、今晚、明早等相对时间时，必须按这个时间换算成具体日期和时间。",
-            now.format("%Y-%m-%d %H:%M:%S %:z")
+            "当前本地时间（应用系统时间，计划任务必须以此为准）：{}；ISO：{}。当用户使用今天、明天、下周、今晚、明早、几分钟后等相对时间时，必须按这个时间换算成具体日期和时间，不要凭空猜测。",
+            now.format("%Y-%m-%d %H:%M:%S %:z"),
+            now.to_rfc3339()
         )),
     });
 

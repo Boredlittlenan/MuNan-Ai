@@ -24,11 +24,11 @@ import {
 } from "./components/ChatMessageBubble";
 import { CustomSelect } from "./components/CustomSelect";
 import {
-  AGENT_SCHEDULED_TASKS_CHANGED_EVENT,
+  CONVERSATIONS_CHANGED_EVENT,
   type AppConfig,
   type AgentScheduledTask,
   type AgentScheduledTaskKind,
-  type AgentScheduledTaskRecurrence,
+  type AgentScheduledTaskScheduleMode,
   type Conversation,
   type Message,
   type MessageAttachment,
@@ -47,6 +47,7 @@ import {
   loadConversationsFromStorage,
   loadUserState,
   normalizeAgentTaskCustomIntervalDays,
+  normalizeAgentTaskTimeOfDay,
   normalizeConversations,
   normalizeAppConfig,
   saveAgentScheduledTasks,
@@ -98,6 +99,26 @@ type AgentTavilyPlan = {
   reason: string;
 };
 
+type AgentScheduledTaskPlan = {
+  should_create: boolean;
+  tasks: AgentScheduledTaskPlanItem[];
+  reason: string;
+};
+
+type AgentScheduledTaskPlanItem = {
+  title?: string;
+  prompt?: string;
+  kind?: string;
+  schedule_mode?: string;
+  scheduled_at?: string;
+  time_of_day?: string;
+  weekdays?: number[];
+  month_day?: number | null;
+  year_month?: number | null;
+  year_month_day?: number | null;
+  custom_interval_days?: number | null;
+};
+
 type AgentTavilySearchResult = {
   query: string;
   answer: string;
@@ -121,7 +142,6 @@ type AgentToolCall =
 
 const MAX_IMAGE_ATTACHMENTS = 4;
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024;
-const SCHEDULED_TASK_CONVERSATION_ID = "agent-scheduled-tasks";
 
 /* =========================
    页面职责说明
@@ -190,7 +210,6 @@ function App() {
     "idle"
   );
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [scheduledTasks, setScheduledTasks] = useState<AgentScheduledTask[]>([]);
 
   /**
    * 聊天区底部锚点，用于每次发送和收到消息后自动滚动到底部。
@@ -201,7 +220,6 @@ function App() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingStreamRef = useRef<MediaStream | null>(null);
-  const runningScheduledTaskIdsRef = useRef<Set<string>>(new Set());
 
   /**
    * 当前模型下的所有会话，以及当前真正选中的会话对象。
@@ -279,21 +297,6 @@ function App() {
     void loadConfig();
   }, []);
 
-  useEffect(() => {
-    const refreshScheduledTasks = () => {
-      setScheduledTasks(loadAgentScheduledTasks());
-    };
-
-    refreshScheduledTasks();
-    window.addEventListener(AGENT_SCHEDULED_TASKS_CHANGED_EVENT, refreshScheduledTasks);
-    window.addEventListener("storage", refreshScheduledTasks);
-
-    return () => {
-      window.removeEventListener(AGENT_SCHEDULED_TASKS_CHANGED_EVENT, refreshScheduledTasks);
-      window.removeEventListener("storage", refreshScheduledTasks);
-    };
-  }, []);
-
   /**
    * 会话长期存储在 Rust 侧 SQLite。
    * 首次升级时，如果发现旧 localStorage 里还有会话，会自动导入 SQLite。
@@ -359,6 +362,35 @@ function App() {
     return () => window.clearTimeout(saveTimer);
   }, [conversations, conversationsReady]);
 
+  useEffect(() => {
+    let canceled = false;
+
+    const refreshConversationHistory = async () => {
+      try {
+        const stored = normalizeConversations(
+          await invoke<Record<ModelType, Conversation[]>>("load_conversations")
+        );
+
+        if (!canceled) {
+          setConversations(stored);
+          setConversationsReady(true);
+          setHistoryError("");
+        }
+      } catch (error) {
+        if (!canceled) {
+          setHistoryError(`会话数据库刷新失败：${String(error)}`);
+        }
+      }
+    };
+
+    window.addEventListener(CONVERSATIONS_CHANGED_EVENT, refreshConversationHistory);
+
+    return () => {
+      canceled = true;
+      window.removeEventListener(CONVERSATIONS_CHANGED_EVENT, refreshConversationHistory);
+    };
+  }, []);
+
   /**
    * 记录“当前模型 + 当前会话”。
    * 设置页切回聊天页后，也能继续停留在用户刚刚使用的位置。
@@ -407,20 +439,6 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!conversationsReady || configStatus !== "ready") {
-      return;
-    }
-
-    const tick = () => {
-      void runDueScheduledTasks();
-    };
-
-    tick();
-    const timer = window.setInterval(tick, 15_000);
-    return () => window.clearInterval(timer);
-  }, [appConfig, configStatus, conversationsReady, scheduledTasks]);
-
   /**
    * 当前模型是否已经配置可用。
    * 只要 base_url、api_key 和 model 名称任意一个为空，就视为未完成配置。
@@ -434,162 +452,6 @@ function App() {
 
     const reasonText = reason?.trim() ? `\n\n原因：${reason.trim()}` : "";
     return window.confirm(`Agent 准备执行 Shell 命令：\n${command}${reasonText}\n\n是否继续？`);
-  };
-
-  const runDueScheduledTasks = async () => {
-    const dueTasks = scheduledTasks
-      .filter(
-        (task) =>
-          task.enabled &&
-          task.status === "pending" &&
-          task.scheduled_at <= Date.now() &&
-          !runningScheduledTaskIdsRef.current.has(task.id)
-      )
-      .sort((left, right) => left.scheduled_at - right.scheduled_at);
-
-    for (const task of dueTasks) {
-      runningScheduledTaskIdsRef.current.add(task.id);
-      void runScheduledTask(task).finally(() => {
-        runningScheduledTaskIdsRef.current.delete(task.id);
-      });
-    }
-  };
-
-  const runScheduledTask = async (task: AgentScheduledTask) => {
-    const userMessage: Message = {
-      role: "user",
-      content: buildScheduledTaskUserPrompt(task),
-    };
-
-    try {
-      if (task.kind === "reminder") {
-        const reminderMessage: Message = {
-          role: "ai",
-          content: `计划任务提醒：${task.title}\n\n${task.prompt}`,
-          tts_text: `(清晰 温柔)计划任务提醒：${task.title}。${task.prompt}`,
-        };
-
-        appendScheduledTaskMessages(task, [userMessage, reminderMessage]);
-        markScheduledTaskResult(task.id, "done");
-        setCopyNotice(`计划任务已提醒：${task.title}`);
-        return;
-      }
-
-      if (!isModelConfigured(appConfig, task.model)) {
-        throw new Error(`模型 ${getModelMeta(appConfig, task.model).label} 还没有配置完整。`);
-      }
-
-      const reply = await invoke<ChatReplyResponse>("chat_with_ai", {
-        model: task.model,
-        messages: [toApiMessage(userMessage)],
-        conversationId: SCHEDULED_TASK_CONVERSATION_ID,
-      });
-      const replyForToolDetection = {
-        ...reply,
-        original_content: reply.original_content || reply.content,
-      };
-      const finalReply = await resolveAgentToolCallReply(
-        replyForToolDetection,
-        [userMessage],
-        SCHEDULED_TASK_CONVERSATION_ID,
-        task.model
-      );
-      const aiMessage = createReplyMessage(finalReply, task.model, [], false);
-
-      appendScheduledTaskMessages(task, [userMessage, aiMessage]);
-      markScheduledTaskResult(task.id, "done");
-      setCopyNotice(`计划任务已执行：${task.title}`);
-    } catch (taskError) {
-      const errorText = String(taskError);
-      appendScheduledTaskMessages(task, [
-        userMessage,
-        {
-          role: "ai",
-          content: `计划任务执行失败：${task.title}\n\n${errorText}`,
-          tts_text: `(平静)计划任务执行失败：${task.title}。请检查设置。`,
-        },
-      ]);
-      markScheduledTaskResult(task.id, "failed", errorText);
-      setCopyNotice(`计划任务执行失败：${task.title}`);
-    }
-  };
-
-  const appendScheduledTaskMessages = (task: AgentScheduledTask, messages: Message[]) => {
-    const now = Date.now();
-    const meta = getModelMeta(appConfig, task.model);
-    const providerModel = getModelConfig(appConfig, task.model).model;
-
-    setConversations((previous) => {
-      const modelConversations = previous[task.model] ?? [];
-      const existingConversation = modelConversations.find(
-        (conversation) => conversation.id === SCHEDULED_TASK_CONVERSATION_ID
-      );
-      const nextConversation: Conversation = existingConversation
-        ? {
-            ...existingConversation,
-            provider_model: providerModel || existingConversation.provider_model,
-            updated_at: now,
-            messages: [...existingConversation.messages, ...messages],
-          }
-        : {
-            id: SCHEDULED_TASK_CONVERSATION_ID,
-            model: task.model,
-            provider_model: providerModel,
-            name: `${meta.label} 计划任务`,
-            created_at: now,
-            updated_at: now,
-            messages,
-          };
-
-      return {
-        ...previous,
-        [task.model]: [
-          nextConversation,
-          ...modelConversations.filter(
-            (conversation) => conversation.id !== SCHEDULED_TASK_CONVERSATION_ID
-          ),
-        ],
-      };
-    });
-  };
-
-  const markScheduledTaskResult = (
-    taskId: string,
-    status: "done" | "failed",
-    lastError = ""
-  ) => {
-    const now = Date.now();
-    const nextTasks = loadAgentScheduledTasks().map((task) => {
-      if (task.id !== taskId) {
-        return task;
-      }
-
-      if (status === "done" && task.schedule_type === "recurring") {
-        const nextRunAt = getNextAgentScheduledTaskRun(task, now);
-        const nextStatus: AgentScheduledTask["status"] = nextRunAt ? "pending" : "done";
-
-        return {
-          ...task,
-          enabled: Boolean(nextRunAt),
-          status: nextStatus,
-          scheduled_at: nextRunAt ?? task.scheduled_at,
-          updated_at: now,
-          last_run_at: now,
-          last_error: undefined,
-        };
-      }
-
-      return {
-        ...task,
-        enabled: false,
-        status,
-        updated_at: now,
-        last_run_at: now,
-        last_error: lastError || undefined,
-      };
-    });
-
-    saveScheduledTaskState(nextTasks);
   };
 
   const switchProviderModel = async (modelName: string) => {
@@ -750,18 +612,24 @@ function App() {
 
   const saveScheduledTaskState = (tasks: AgentScheduledTask[]) => {
     saveAgentScheduledTasks(tasks);
-    setScheduledTasks(loadAgentScheduledTasks());
   };
 
   const createReplyMessage = (
     reply: ChatReplyResponse,
     taskModel: ModelType,
     toolContexts: string[] = [],
-    allowTaskCreation = true
+    allowTaskCreation = true,
+    fallbackTaskRequest = ""
   ): Message => {
-    const taskCreation = allowTaskCreation
-      ? createScheduledTasksFromReply(reply.content, taskModel)
+    const structuredTaskCreation = allowTaskCreation
+      ? createScheduledTasksFromReply(reply.original_content || reply.content, taskModel)
       : { tasks: [], rejectedCount: 0 };
+    const fallbackTaskCreation = allowTaskCreation
+      ? createScheduledTasksFromUserRequest(fallbackTaskRequest, taskModel)
+      : { tasks: [], rejectedCount: 0 };
+    const taskCreation =
+      fallbackTaskCreation.tasks.length > 0 ? fallbackTaskCreation : structuredTaskCreation;
+    const usedFallbackTaskCreation = fallbackTaskCreation.tasks.length > 0;
 
     if (taskCreation.tasks.length > 0) {
       saveScheduledTaskState([...loadAgentScheduledTasks(), ...taskCreation.tasks]);
@@ -771,7 +639,9 @@ function App() {
     const replyImages = extractImageAttachments(cleanedContent);
     const replyContent = stripImageMarkdown(cleanedContent);
     const taskNotice = buildScheduledTaskCreationNotice(taskCreation.tasks);
-    const contentParts = [replyContent, taskNotice].filter(Boolean);
+    const contentParts = usedFallbackTaskCreation
+      ? [taskNotice, "已按本机当前时间创建真实计划任务，到点后会自动执行。"].filter(Boolean)
+      : [replyContent, taskNotice].filter(Boolean);
 
     if (taskCreation.rejectedCount > 0) {
       contentParts.push(`有 ${taskCreation.rejectedCount} 个计划任务格式不完整，已忽略。`);
@@ -930,6 +800,52 @@ function App() {
     }
   };
 
+  const runAgentScheduledTaskCreation = async (
+    text: string,
+    optimisticMessages: Message[]
+  ): Promise<Message | null> => {
+    if (!currentModelReady || !looksLikePotentialScheduledTaskRequest(text)) {
+      return null;
+    }
+
+    let plan: AgentScheduledTaskPlan;
+    try {
+      plan = await invoke<AgentScheduledTaskPlan>("agent_plan_scheduled_tasks", {
+        request: {
+          model,
+          userText: text,
+          messages: optimisticMessages.map(toApiMessage),
+        },
+      });
+    } catch (planError) {
+      console.warn("计划任务规划失败，回退到普通聊天。", planError);
+      return null;
+    }
+
+    if (!plan.should_create) {
+      return null;
+    }
+
+    const taskCreation = createScheduledTasksFromPlan(plan, model);
+    if (taskCreation.tasks.length > 0) {
+      saveScheduledTaskState([...loadAgentScheduledTasks(), ...taskCreation.tasks]);
+
+      return {
+        role: "ai",
+        content: `${buildScheduledTaskCreationNotice(taskCreation.tasks)}\n\n已根据你的要求创建真实计划任务，到点后会自动执行。`,
+        tts_text: "(清晰)已根据你的要求创建计划任务，到点后会自动执行。",
+        original_content: JSON.stringify(plan, null, 2),
+      };
+    }
+
+    return {
+      role: "ai",
+      content: `我识别到你想创建计划任务，但规划结果没有通过应用校验，所以没有保存。\n\n原因：${plan.reason || "时间或调度规则不完整"}。请换一种更明确的说法，例如“每天早上 9 点提醒我天气”。`,
+      tts_text: "(平静)我识别到你想创建计划任务，但时间或规则不完整，所以没有保存。",
+      original_content: JSON.stringify(plan, null, 2),
+    };
+  };
+
   const runAgentAutoShellAction = async (
     text: string,
     optimisticMessages: Message[],
@@ -1032,7 +948,7 @@ function App() {
       result = await invoke<AgentTavilySearchResult>("agent_tavily_search", {
         request: {
           query: plan.query,
-          maxResults: appConfig.agent.tavily_max_results,
+          max_results: appConfig.agent.tavily_max_results,
         },
       });
     } catch (searchError) {
@@ -1151,7 +1067,7 @@ function App() {
           const result = await invoke<AgentTavilySearchResult>("agent_tavily_search", {
             request: {
               query: toolCall.query,
-              maxResults: appConfig.agent.tavily_max_results,
+              max_results: appConfig.agent.tavily_max_results,
             },
           });
           toolContexts.push(
@@ -1197,8 +1113,10 @@ function App() {
    * 3. 成功时写入 AI 回复，失败时写入错误提示气泡。
    */
   const sendMessage = async () => {
+    const userText = input.trim();
+
     if (
-      (!input.trim() && pendingAttachments.length === 0) ||
+      (!userText && pendingAttachments.length === 0) ||
       loading ||
       !conversationsReady
     ) {
@@ -1225,7 +1143,7 @@ function App() {
     const shouldCreateConversation = !currentConversation;
     const userMessage: Message = {
       role: "user",
-      content: input.trim(),
+      content: userText,
       attachments: pendingAttachments,
     };
 
@@ -1251,8 +1169,29 @@ function App() {
     setLoading(true);
 
     try {
+      const scheduledTaskReply = await runAgentScheduledTaskCreation(
+        userText,
+        optimisticMessages
+      );
+
+      if (scheduledTaskReply) {
+        setConversations((previous) => ({
+          ...previous,
+          [model]: (previous[model] ?? []).map((conversation) =>
+            conversation.id === activeConversation.id
+              ? {
+                  ...conversation,
+                  updated_at: Date.now(),
+                  messages: [...optimisticMessages, scheduledTaskReply],
+                }
+              : conversation
+          ),
+        }));
+        return;
+      }
+
       const agentReply = await runAgentQuickAction(
-        input.trim(),
+        userText,
         optimisticMessages,
         activeConversation.id
       );
@@ -1274,7 +1213,7 @@ function App() {
       }
 
       const tavilyAgentReply = await runAgentAutoTavilyAction(
-        input.trim(),
+        userText,
         optimisticMessages,
         activeConversation.id
       );
@@ -1296,7 +1235,7 @@ function App() {
       }
 
       const autoAgentReply = await runAgentAutoShellAction(
-        input.trim(),
+        userText,
         optimisticMessages,
         activeConversation.id
       );
@@ -1355,7 +1294,7 @@ function App() {
         optimisticMessages,
         activeConversation.id
       );
-      const replyMessage = createReplyMessage(finalReply, model);
+      const replyMessage = createReplyMessage(finalReply, model, [], true, userText);
 
       setConversations((previous) => ({
         ...previous,
@@ -2468,44 +2407,97 @@ const createScheduledTasksFromReply = (
     const prompt = extractTagText(block, "prompt");
     const scheduledAtText = extractTagText(block, "scheduled_at");
     const kindText = extractTagText(block, "kind")?.toLowerCase() ?? "";
+    const scheduleModeText = extractTagText(block, "schedule_mode")?.toLowerCase() ?? "";
     const scheduleTypeText = extractTagText(block, "schedule_type")?.toLowerCase() ?? "";
     const recurrenceText = extractTagText(block, "recurrence")?.toLowerCase() ?? "";
+    const timeOfDayText = extractTagText(block, "time_of_day") ?? "";
+    const weekdaysText = extractTagText(block, "weekdays") ?? "";
+    const monthDayText =
+      extractTagText(block, "month_day") || extractTagText(block, "month_days") || "";
+    const yearMonthText = extractTagText(block, "year_month") ?? "";
+    const yearMonthDayText = extractTagText(block, "year_month_day") ?? "";
     const customIntervalDaysText = extractTagText(block, "custom_interval_days") ?? "";
     const scheduledAt = scheduledAtText ? Date.parse(scheduledAtText) : Number.NaN;
-
-    if (!prompt || !Number.isFinite(scheduledAt) || scheduledAt <= Date.now()) {
-      rejectedCount += 1;
-      continue;
-    }
 
     const now = Date.now();
     const kind: AgentScheduledTaskKind =
       kindText.includes("reminder") || kindText.includes("提醒")
         ? "reminder"
         : "ai_prompt";
-    const recurrence = parseScheduledTaskRecurrence(recurrenceText);
-    const scheduleType =
-      scheduleTypeText.includes("recurring") ||
-      scheduleTypeText.includes("repeat") ||
-      scheduleTypeText.includes("重复") ||
-      recurrenceText.trim()
-        ? "recurring"
-        : "once";
+    const scheduleMode = parseScheduledTaskScheduleMode(
+      scheduleModeText,
+      scheduleTypeText,
+      recurrenceText
+    );
+    const recurrence = scheduleMode === "once" ? undefined : scheduleMode;
+    const timeOfDay = normalizeAgentTaskTimeOfDay(
+      timeOfDayText,
+      Number.isFinite(scheduledAt) ? scheduledAt : now
+    );
+    const weekdays = parseNumberList(weekdaysText, 1, 7);
+    const monthDay = Number(monthDayText);
+    const yearMonth = Number(yearMonthText);
+    const yearMonthDay = Number(yearMonthDayText);
     const customIntervalDays = normalizeAgentTaskCustomIntervalDays(
       Number(customIntervalDaysText)
     );
+    const baseScheduledAt =
+      scheduleMode === "once"
+        ? scheduledAt
+        : buildInitialScheduledTaskAnchor(scheduleMode, timeOfDay, now);
+    const timeOfDayValid = scheduleMode === "once" || isValidTimeOfDay(timeOfDayText);
+    const scheduleDetailsValid =
+      timeOfDayValid &&
+      (scheduleMode !== "weekly" || weekdays.length > 0) &&
+      (scheduleMode !== "monthly" || isValidScheduleDay(monthDay, 1, 31)) &&
+      (scheduleMode !== "yearly" ||
+        (isValidScheduleDay(yearMonth, 1, 12) &&
+          isValidScheduleDay(
+            yearMonthDay,
+            1,
+            getDaysInMonthForScheduledTask(2028, Math.round(yearMonth) - 1)
+          ))) &&
+      (scheduleMode !== "custom_days" ||
+        (Boolean(customIntervalDaysText.trim()) &&
+          Number.isFinite(Number(customIntervalDaysText)) &&
+          Number(customIntervalDaysText) > 0));
 
-    tasks.push({
+    if (!prompt || !Number.isFinite(baseScheduledAt) || !scheduleDetailsValid) {
+      rejectedCount += 1;
+      continue;
+    }
+
+    if (scheduleMode === "once" && baseScheduledAt <= now) {
+      rejectedCount += 1;
+      continue;
+    }
+
+    const task: AgentScheduledTask = {
       id: createAgentScheduledTaskId(),
       title: title.trim(),
       prompt: prompt.trim(),
-      scheduled_at: scheduledAt,
+      scheduled_at: baseScheduledAt,
       enabled: true,
       kind,
-      schedule_type: scheduleType,
-      recurrence: scheduleType === "recurring" ? recurrence : undefined,
+      schedule_mode: scheduleMode,
+      schedule_type: scheduleMode === "once" ? "once" : "recurring",
+      recurrence,
+      time_of_day: scheduleMode === "once" ? undefined : timeOfDay,
+      weekdays: scheduleMode === "weekly" ? weekdays : undefined,
+      month_days:
+        scheduleMode === "monthly" && Number.isFinite(monthDay) && monthDay >= 1
+          ? [Math.min(Math.max(Math.round(monthDay), 1), 31)]
+          : undefined,
+      year_month:
+        scheduleMode === "yearly" && Number.isFinite(yearMonth)
+          ? Math.min(Math.max(Math.round(yearMonth), 1), 12)
+          : undefined,
+      year_month_day:
+        scheduleMode === "yearly" && Number.isFinite(yearMonthDay)
+          ? Math.min(Math.max(Math.round(yearMonthDay), 1), 31)
+          : undefined,
       custom_interval_days:
-        scheduleType === "recurring" && recurrence === "custom_days"
+        scheduleMode === "custom_days"
           ? customIntervalDays
           : undefined,
       status: "pending",
@@ -2513,35 +2505,464 @@ const createScheduledTasksFromReply = (
       source: "chat",
       created_at: now,
       updated_at: now,
+    };
+    const nextRunAt =
+      scheduleMode === "once" ? baseScheduledAt : getNextAgentScheduledTaskRun(task, now);
+
+    if (!nextRunAt || nextRunAt <= now) {
+      rejectedCount += 1;
+      continue;
+    }
+
+    tasks.push({
+      ...task,
+      scheduled_at: nextRunAt,
     });
   }
 
   return { tasks, rejectedCount };
 };
 
-const parseScheduledTaskRecurrence = (value: string): AgentScheduledTaskRecurrence => {
-  if (value.includes("weekly") || value.includes("week") || value.includes("周")) {
-    return "weekly";
+const createScheduledTasksFromPlan = (
+  plan: AgentScheduledTaskPlan,
+  model: ModelType
+): ScheduledTaskCreationResult => {
+  if (!plan.should_create || plan.tasks.length === 0) {
+    return { tasks: [], rejectedCount: 0 };
   }
 
-  if (value.includes("monthly") || value.includes("month") || value.includes("月")) {
-    return "monthly";
+  return createScheduledTasksFromReply(
+    plan.tasks.map(planItemToScheduledTaskBlock).join("\n"),
+    model
+  );
+};
+
+const planItemToScheduledTaskBlock = (item: AgentScheduledTaskPlanItem): string => {
+  const scheduleMode = normalizePlannedScheduleMode(item.schedule_mode);
+  const kind = item.kind === "reminder" ? "reminder" : "ai_prompt";
+  const lines = [
+    "<scheduled_task>",
+    `<title>${escapeTagText(item.title || "计划任务")}</title>`,
+    `<schedule_mode>${scheduleMode}</schedule_mode>`,
+    `<kind>${kind}</kind>`,
+    `<prompt>${escapeTagText(item.prompt || item.title || "到点后执行计划任务。")}</prompt>`,
+  ];
+
+  if (scheduleMode === "once") {
+    lines.push(`<scheduled_at>${escapeTagText(item.scheduled_at || "")}</scheduled_at>`);
+  } else {
+    lines.push(`<time_of_day>${escapeTagText(item.time_of_day || "")}</time_of_day>`);
   }
 
-  if (value.includes("yearly") || value.includes("annual") || value.includes("年")) {
-    return "yearly";
+  if (scheduleMode === "weekly") {
+    lines.push(`<weekdays>${escapeTagText((item.weekdays || []).join(","))}</weekdays>`);
   }
 
+  if (scheduleMode === "monthly") {
+    lines.push(`<month_day>${item.month_day ?? ""}</month_day>`);
+  }
+
+  if (scheduleMode === "yearly") {
+    lines.push(`<year_month>${item.year_month ?? ""}</year_month>`);
+    lines.push(`<year_month_day>${item.year_month_day ?? ""}</year_month_day>`);
+  }
+
+  if (scheduleMode === "custom_days") {
+    lines.push(`<custom_interval_days>${item.custom_interval_days ?? ""}</custom_interval_days>`);
+  }
+
+  lines.push("</scheduled_task>");
+  return lines.join("\n");
+};
+
+const normalizePlannedScheduleMode = (
+  value: string | undefined
+): AgentScheduledTaskScheduleMode => {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return isScheduledTaskScheduleMode(normalized)
+    ? normalized
+    : parseScheduledTaskScheduleMode(normalized, "", "");
+};
+
+const escapeTagText = (value: string): string => {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+};
+
+const createScheduledTasksFromUserRequest = (
+  content: string,
+  model: ModelType
+): ScheduledTaskCreationResult => {
+  const text = content.trim();
+  if (!text || looksLikeRecurringScheduledTaskRequest(text) || !looksLikeScheduledTaskRequest(text)) {
+    return { tasks: [], rejectedCount: 0 };
+  }
+
+  const now = Date.now();
+  const scheduledAt = parseSingleScheduledTaskTime(text, now);
+  if (!scheduledAt || scheduledAt <= now) {
+    return { tasks: [], rejectedCount: 0 };
+  }
+
+  const kind = inferScheduledTaskKind(text);
+  const task: AgentScheduledTask = {
+    id: createAgentScheduledTaskId(),
+    title: inferScheduledTaskTitle(text, kind),
+    prompt:
+      kind === "ai_prompt"
+        ? `按用户原始请求执行，并直接给出结果：${text}`
+        : stripScheduleTimePhrases(text) || text,
+    scheduled_at: scheduledAt,
+    enabled: true,
+    kind,
+    schedule_mode: "once",
+    schedule_type: "once",
+    status: "pending",
+    model,
+    source: "chat",
+    created_at: now,
+    updated_at: now,
+  };
+
+  return { tasks: [task], rejectedCount: 0 };
+};
+
+const looksLikeRecurringScheduledTaskRequest = (text: string): boolean => {
+  return /(每天|每日|每周|每月|每年|每隔|每[0-9零〇一二两三四五六七八九十百]+天)/.test(text);
+};
+
+const looksLikePotentialScheduledTaskRequest = (text: string): boolean => {
+  const normalized = text.replace(/\s+/g, "");
+  const hasScheduleSignal =
+    /(提醒|通知|告诉|叫我|闹钟|日程|计划任务|定时|到点|以后|每天|每日|每周|每月|每年|每隔|分钟后|小时后|明天|后天|明早|明晚|今晚|早晨|早上|上午|中午|下午|晚上|[0-9零〇一二两三四五六七八九十]{1,3}(点|时))/.test(
+      normalized
+    );
+  const hasTaskSignal =
+    /(提醒|通知|告诉|叫我|执行|查询|播报|汇报|总结|整理|天气|闹钟|日程|任务|待办|会议|喝水|吃药)/.test(
+      normalized
+    );
+
+  return hasScheduleSignal && hasTaskSignal;
+};
+
+const looksLikeScheduledTaskRequest = (text: string): boolean => {
+  return (
+    /(提醒|通知|告诉|叫我|闹钟|到点|执行|查询|播报|汇报|总结|整理)/.test(text) &&
+    hasSingleScheduledTaskTime(text)
+  );
+};
+
+const hasSingleScheduledTaskTime = (text: string): boolean => {
+  return Boolean(parseSingleScheduledTaskTime(text, Date.now()));
+};
+
+const parseSingleScheduledTaskTime = (text: string, now: number): number | null => {
+  const normalized = text.replace(/\s+/g, "");
+  const relativeMinutes = parseRelativeDelayMinutes(normalized);
+  if (relativeMinutes !== null) {
+    return now + relativeMinutes * 60_000;
+  }
+
+  const dayOffset = parseRelativeDayOffset(normalized);
+  const clock = parseClockTime(normalized);
+  if (!clock) {
+    return null;
+  }
+
+  const candidate = new Date(now);
+  if (dayOffset !== null) {
+    candidate.setDate(candidate.getDate() + dayOffset);
+  }
+  candidate.setHours(clock.hours, clock.minutes, 0, 0);
+
+  if (dayOffset === null && candidate.getTime() <= now) {
+    candidate.setDate(candidate.getDate() + 1);
+  }
+
+  return candidate.getTime();
+};
+
+const parseRelativeDelayMinutes = (text: string): number | null => {
+  if (/半(个)?小时后/.test(text)) {
+    return 30;
+  }
+
+  const minuteMatch = text.match(/([0-9]+|[零〇一二两三四五六七八九十百]+)(?:个)?(?:分钟|分)后/);
+  if (minuteMatch) {
+    return parseChineseNumber(minuteMatch[1]);
+  }
+
+  const hourMatch = text.match(/([0-9]+|[零〇一二两三四五六七八九十百]+)(?:个)?(?:小时|钟头)后/);
+  if (hourMatch) {
+    return parseChineseNumber(hourMatch[1]) * 60;
+  }
+
+  return null;
+};
+
+const parseRelativeDayOffset = (text: string): number | null => {
+  if (/后天/.test(text)) {
+    return 2;
+  }
+
+  if (/明天|明早|明晚/.test(text)) {
+    return 1;
+  }
+
+  if (/今天|今晚|今早|稍后/.test(text)) {
+    return 0;
+  }
+
+  return null;
+};
+
+const parseClockTime = (
+  text: string
+): { hours: number; minutes: number } | null => {
+  const period = text.match(/(凌晨|早上|上午|中午|下午|晚上|今晚|明早|明晚)/)?.[1] ?? "";
+  const colonMatch = text.match(/([01]?\d|2[0-3])[:：]([0-5]\d)/);
+  const hourMatch =
+    colonMatch ??
+    text.match(/([0-9]{1,2}|[零〇一二两三四五六七八九十]{1,3})(?:点|时)(半|[0-9]{1,2}|[零〇一二两三四五六七八九十]{1,3})?/);
+
+  if (!hourMatch) {
+    return null;
+  }
+
+  let hours = parseChineseNumber(hourMatch[1]);
+  let minutes = 0;
+
+  if (colonMatch) {
+    minutes = Number(colonMatch[2]);
+  } else if (hourMatch[2] === "半") {
+    minutes = 30;
+  } else if (hourMatch[2]) {
+    minutes = parseChineseNumber(hourMatch[2]);
+  }
+
+  if ((period.includes("下午") || period.includes("晚上") || period.includes("晚")) && hours < 12) {
+    hours += 12;
+  }
+
+  if (period.includes("中午") && hours < 11) {
+    hours += 12;
+  }
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return null;
+  }
+
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+
+  return { hours, minutes };
+};
+
+const parseChineseNumber = (value: string): number => {
+  if (/^\d+$/.test(value)) {
+    return Number(value);
+  }
+
+  const digitMap: Record<string, number> = {
+    零: 0,
+    "〇": 0,
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+  };
+
+  if (value === "十") {
+    return 10;
+  }
+
+  if (value.includes("百")) {
+    const [hundredsText, restText = ""] = value.split("百");
+    return (digitMap[hundredsText] || 1) * 100 + (restText ? parseChineseNumber(restText) : 0);
+  }
+
+  if (value.includes("十")) {
+    const [tensText, onesText = ""] = value.split("十");
+    return (tensText ? digitMap[tensText] || 0 : 1) * 10 + (onesText ? digitMap[onesText] || 0 : 0);
+  }
+
+  return digitMap[value] ?? Number.NaN;
+};
+
+const inferScheduledTaskKind = (text: string): AgentScheduledTaskKind => {
+  return /(天气|查询|搜索|联网|告诉|播报|汇报|总结|整理|检查|生成|执行)/.test(text)
+    ? "ai_prompt"
+    : "reminder";
+};
+
+const inferScheduledTaskTitle = (
+  text: string,
+  kind: AgentScheduledTaskKind
+): string => {
+  if (/天气/.test(text)) {
+    return "天气提醒";
+  }
+
+  if (/闹钟/.test(text)) {
+    return "闹钟提醒";
+  }
+
+  const action = stripScheduleTimePhrases(text)
+    .replace(/^(请|帮我|麻烦|记得|到时候|然后)/, "")
+    .trim();
+  const fallback = kind === "ai_prompt" ? "AI 定时任务" : "提醒任务";
+
+  return action ? action.slice(0, 24) : fallback;
+};
+
+const stripScheduleTimePhrases = (text: string): string => {
+  return text
+    .replace(/半(个)?小时后/g, "")
+    .replace(/([0-9]+|[零〇一二两三四五六七八九十百]+)(?:个)?(?:分钟|分|小时|钟头)后/g, "")
+    .replace(/(今天|明天|后天|今晚|明早|明晚|今早|稍后)/g, "")
+    .replace(/(凌晨|早上|上午|中午|下午|晚上)?([0-9]{1,2}|[零〇一二两三四五六七八九十]{1,3})([:：][0-5]\d|(?:点|时)(半|[0-9]{1,2}|[零〇一二两三四五六七八九十]{1,3})?)?/g, "")
+    .replace(/^(提醒我|通知我|告诉我|叫我)/, "")
+    .trim();
+};
+
+const parseScheduledTaskScheduleMode = (
+  modeValue: string,
+  scheduleTypeValue: string,
+  recurrenceValue: string
+): AgentScheduledTaskScheduleMode => {
+  if (isScheduledTaskScheduleMode(modeValue)) {
+    return modeValue;
+  }
+
+  const normalized = `${modeValue} ${scheduleTypeValue} ${recurrenceValue}`.toLowerCase();
   if (
-    value.includes("custom") ||
-    value.includes("interval") ||
-    value.includes("自定义") ||
-    value.includes("间隔")
+    normalized.includes("custom_days") ||
+    normalized.includes("custom") ||
+    normalized.includes("interval") ||
+    normalized.includes("自定义") ||
+    normalized.includes("间隔")
   ) {
     return "custom_days";
   }
 
-  return "daily";
+  if (
+    normalized.includes("weekly") ||
+    normalized.includes("week") ||
+    normalized.includes("按周") ||
+    normalized.includes("每周")
+  ) {
+    return "weekly";
+  }
+
+  if (
+    normalized.includes("monthly") ||
+    normalized.includes("month") ||
+    normalized.includes("按月") ||
+    normalized.includes("每月")
+  ) {
+    return "monthly";
+  }
+
+  if (
+    normalized.includes("yearly") ||
+    normalized.includes("annual") ||
+    normalized.includes("按年") ||
+    normalized.includes("每年")
+  ) {
+    return "yearly";
+  }
+
+  if (
+    normalized.includes("daily") ||
+    normalized.includes("everyday") ||
+    normalized.includes("按日") ||
+    normalized.includes("每日") ||
+    normalized.includes("每天")
+  ) {
+    return "daily";
+  }
+
+  if (
+    scheduleTypeValue.includes("recurring") ||
+    scheduleTypeValue.includes("repeat") ||
+    scheduleTypeValue.includes("重复")
+  ) {
+    return "daily";
+  }
+
+  return "once";
+};
+
+const isScheduledTaskScheduleMode = (value: string): value is AgentScheduledTaskScheduleMode => {
+  return (
+    value === "once" ||
+    value === "daily" ||
+    value === "weekly" ||
+    value === "monthly" ||
+    value === "yearly" ||
+    value === "custom_days"
+  );
+};
+
+const isValidScheduleDay = (value: number, min: number, max: number): boolean => {
+  return Number.isFinite(value) && value >= min && value <= max;
+};
+
+const isValidTimeOfDay = (value: string): boolean => {
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value.trim());
+};
+
+const getDaysInMonthForScheduledTask = (year: number, monthIndex: number): number => {
+  return new Date(year, monthIndex + 1, 0).getDate();
+};
+
+const parseNumberList = (value: string, min: number, max: number): number[] => {
+  const normalized = value
+    .replace(/[，、;；]/g, ",")
+    .replace(/星期天|星期日|周天|周日|礼拜天|礼拜日/g, "7")
+    .replace(/星期一|周一|礼拜一/g, "1")
+    .replace(/星期二|周二|礼拜二/g, "2")
+    .replace(/星期三|周三|礼拜三/g, "3")
+    .replace(/星期四|周四|礼拜四/g, "4")
+    .replace(/星期五|周五|礼拜五/g, "5")
+    .replace(/星期六|周六|礼拜六/g, "6");
+  const numbers = normalized
+    .split(/[,\s]+/)
+    .map((item) => Math.round(Number(item.trim())))
+    .filter((item) => Number.isFinite(item) && item >= min && item <= max);
+
+  return Array.from(new Set(numbers)).sort((left, right) => left - right);
+};
+
+const buildInitialScheduledTaskAnchor = (
+  mode: AgentScheduledTaskScheduleMode,
+  timeOfDay: string,
+  fromTime: number
+): number => {
+  if (mode === "once") {
+    return fromTime;
+  }
+
+  const [hours, minutes] = normalizeAgentTaskTimeOfDay(timeOfDay, fromTime)
+    .split(":")
+    .map(Number);
+  const candidate = new Date(fromTime);
+  candidate.setHours(hours, minutes, 0, 0);
+
+  if (candidate.getTime() <= fromTime) {
+    candidate.setDate(candidate.getDate() + 1);
+  }
+
+  return candidate.getTime();
 };
 
 const stripScheduledTaskBlocks = (text: string): string => {
@@ -2562,7 +2983,7 @@ const buildScheduledTaskCreationNotice = (tasks: AgentScheduledTask[]): string =
 
   const lines = tasks.map((task) => {
     const scheduleText =
-      task.schedule_type === "recurring"
+      task.schedule_mode !== "once"
         ? `，${formatScheduledTaskRecurrence(task)}`
         : "";
     return `- ${task.title}：${formatFullDateTime(task.scheduled_at)}${scheduleText}`;
@@ -2571,29 +2992,31 @@ const buildScheduledTaskCreationNotice = (tasks: AgentScheduledTask[]): string =
   return `已创建计划任务：\n${lines.join("\n")}`;
 };
 
-const buildScheduledTaskUserPrompt = (task: AgentScheduledTask): string => {
-  const action =
-    task.kind === "reminder"
-      ? "请提醒用户下面这件事。"
-      : "请现在执行这个计划任务，并把结果整理成适合直接阅读的回复。";
-
-  return `这是一个到点触发的 Agent 计划任务。\n任务名称：${task.title}\n计划时间：${formatFullDateTime(task.scheduled_at)}\n调度方式：${task.schedule_type === "recurring" ? formatScheduledTaskRecurrence(task) : "单次任务"}\n任务类型：${task.kind === "reminder" ? "提醒" : "AI 执行"}\n\n${action}\n\n任务内容：\n${task.prompt}`;
-};
-
 const formatScheduledTaskRecurrence = (task: AgentScheduledTask): string => {
-  switch (task.recurrence) {
+  switch (task.schedule_mode) {
     case "weekly":
-      return "每周重复";
+      return `每周 ${formatScheduledTaskWeekdays(task.weekdays)} 重复`;
     case "monthly":
-      return "每月重复";
+      return `每月 ${task.month_days?.[0] ?? 1} 号重复`;
     case "yearly":
-      return "每年重复";
+      return `每年 ${task.year_month ?? 1} 月 ${task.year_month_day ?? 1} 号重复`;
     case "custom_days":
       return `每 ${task.custom_interval_days ?? 1} 天重复`;
     case "daily":
     default:
       return "每日重复";
   }
+};
+
+const formatScheduledTaskWeekdays = (weekdays: number[] | undefined): string => {
+  const labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const selected = Array.isArray(weekdays) && weekdays.length ? weekdays : [1];
+  return selected
+    .slice()
+    .sort((left, right) => left - right)
+    .map((weekday) => labels[weekday - 1])
+    .filter(Boolean)
+    .join("、");
 };
 
 const formatFullDateTime = (timestamp: number): string => {

@@ -128,6 +128,14 @@ export type AgentScheduledTaskRecurrence =
   | "yearly"
   | "custom_days";
 
+export type AgentScheduledTaskScheduleMode =
+  | "once"
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "yearly"
+  | "custom_days";
+
 export type AgentScheduledTask = {
   id: string;
   title: string;
@@ -135,8 +143,14 @@ export type AgentScheduledTask = {
   scheduled_at: number;
   enabled: boolean;
   kind: AgentScheduledTaskKind;
+  schedule_mode: AgentScheduledTaskScheduleMode;
   schedule_type: AgentScheduledTaskScheduleType;
   recurrence?: AgentScheduledTaskRecurrence;
+  time_of_day?: string;
+  weekdays?: number[];
+  month_days?: number[];
+  year_month?: number;
+  year_month_day?: number;
   custom_interval_days?: number;
   status: AgentScheduledTaskStatus;
   model: ModelType;
@@ -273,6 +287,7 @@ const PREFERRED_MODEL_STORAGE_KEY = "preferredModel";
 const AGENT_SCHEDULED_TASKS_STORAGE_KEY = "agentScheduledTasks";
 
 export const AGENT_SCHEDULED_TASKS_CHANGED_EVENT = "agentScheduledTasksChanged";
+export const CONVERSATIONS_CHANGED_EVENT = "chatConversationsChanged";
 
 export const createEmptyAppConfig = (): AppConfig => ({
   schema_version: 1,
@@ -589,26 +604,61 @@ export const normalizeAgentTaskCustomIntervalDays = (value: number): number => {
   return Math.min(Math.max(days, 1), 3650);
 };
 
+export const normalizeAgentTaskTimeOfDay = (
+  value: string | undefined,
+  fallbackTimestamp = Date.now()
+): string => {
+  const match = value?.trim().match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  if (match) {
+    return `${match[1]}:${match[2]}`;
+  }
+
+  const fallback = new Date(fallbackTimestamp);
+  return `${padDateUnit(fallback.getHours())}:${padDateUnit(fallback.getMinutes())}`;
+};
+
 export const isRecurringAgentScheduledTask = (task: AgentScheduledTask): boolean => {
-  return task.schedule_type === "recurring";
+  return task.schedule_mode !== "once";
 };
 
 export const getNextAgentScheduledTaskRun = (
   task: AgentScheduledTask,
   fromTime = Date.now()
 ): number | null => {
-  if (!isRecurringAgentScheduledTask(task)) {
+  if (task.schedule_mode === "once") {
     return null;
+  }
+
+  if (task.schedule_mode === "daily") {
+    return findNextDailyRun(task.time_of_day, fromTime);
+  }
+
+  if (task.schedule_mode === "weekly") {
+    return findNextWeeklyRun(task.weekdays, task.time_of_day, fromTime);
+  }
+
+  if (task.schedule_mode === "monthly") {
+    return findNextMonthlyRun(task.month_days, task.time_of_day, fromTime);
+  }
+
+  if (task.schedule_mode === "yearly") {
+    return findNextYearlyRun(
+      task.year_month,
+      task.year_month_day,
+      task.time_of_day,
+      fromTime
+    );
   }
 
   let nextRunAt = task.scheduled_at;
   let guard = 0;
-
   while (nextRunAt <= fromTime && guard < 5000) {
-    nextRunAt = addAgentTaskRecurrence(nextRunAt, task);
+    nextRunAt = addDays(
+      nextRunAt,
+      normalizeAgentTaskCustomIntervalDays(task.custom_interval_days ?? 1)
+    );
     guard += 1;
   }
-
   return Number.isFinite(nextRunAt) && nextRunAt > fromTime ? nextRunAt : null;
 };
 
@@ -647,23 +697,58 @@ export const normalizeAgentScheduledTasks = (
         task.recurrence === "custom_days"
           ? task.recurrence
           : "daily";
+      const scheduleMode = normalizeAgentScheduledTaskScheduleMode(
+        task.schedule_mode,
+        task.schedule_type,
+        recurrence
+      );
       const scheduleType: AgentScheduledTaskScheduleType =
-        task.schedule_type === "recurring" ? "recurring" : "once";
+        scheduleMode === "once" ? "once" : "recurring";
       const customIntervalDays = normalizeAgentTaskCustomIntervalDays(
         task.custom_interval_days ?? 1
+      );
+      const normalizedScheduledAt = Number.isFinite(scheduledAt) ? scheduledAt : now;
+      const timeOfDay = normalizeAgentTaskTimeOfDay(
+        task.time_of_day,
+        normalizedScheduledAt
+      );
+      const weekdays = normalizeNumberList(task.weekdays, 1, 7, [
+        getChineseWeekday(normalizedScheduledAt),
+      ]);
+      const monthDays = normalizeNumberList(task.month_days, 1, 31, [
+        new Date(normalizedScheduledAt).getDate(),
+      ]);
+      const fallbackDate = new Date(normalizedScheduledAt);
+      const yearMonth = normalizeRangeNumber(
+        task.year_month,
+        1,
+        12,
+        fallbackDate.getMonth() + 1
+      );
+      const yearMonthDay = normalizeRangeNumber(
+        task.year_month_day,
+        1,
+        getDaysInMonth(2028, yearMonth - 1),
+        Math.min(fallbackDate.getDate(), getDaysInMonth(2028, yearMonth - 1))
       );
 
       return {
         id: task.id?.trim() || createAgentScheduledTaskId(),
         title: task.title!.trim(),
         prompt: task.prompt!.trim(),
-        scheduled_at: Number.isFinite(scheduledAt) ? scheduledAt : now,
+        scheduled_at: normalizedScheduledAt,
         enabled: task.enabled ?? status === "pending",
         kind,
+        schedule_mode: scheduleMode,
         schedule_type: scheduleType,
-        recurrence: scheduleType === "recurring" ? recurrence : undefined,
+        recurrence: scheduleMode === "once" ? undefined : modeToRecurrence(scheduleMode),
+        time_of_day: scheduleMode === "once" ? undefined : timeOfDay,
+        weekdays: scheduleMode === "weekly" ? weekdays : undefined,
+        month_days: scheduleMode === "monthly" ? monthDays : undefined,
+        year_month: scheduleMode === "yearly" ? yearMonth : undefined,
+        year_month_day: scheduleMode === "yearly" ? yearMonthDay : undefined,
         custom_interval_days:
-          scheduleType === "recurring" && recurrence === "custom_days"
+          scheduleMode === "custom_days"
             ? customIntervalDays
             : undefined,
         status,
@@ -702,26 +787,189 @@ export const saveAgentScheduledTasks = (tasks: AgentScheduledTask[]): void => {
   window.dispatchEvent(new CustomEvent(AGENT_SCHEDULED_TASKS_CHANGED_EVENT));
 };
 
-const addAgentTaskRecurrence = (
-  timestamp: number,
-  task: AgentScheduledTask
-): number => {
-  switch (task.recurrence) {
-    case "weekly":
-      return addDays(timestamp, 7);
-    case "monthly":
-      return addMonthsClamped(timestamp, 1);
-    case "yearly":
-      return addYearsClamped(timestamp, 1);
-    case "custom_days":
-      return addDays(
-        timestamp,
-        normalizeAgentTaskCustomIntervalDays(task.custom_interval_days ?? 1)
-      );
-    case "daily":
-    default:
-      return addDays(timestamp, 1);
+const normalizeAgentScheduledTaskScheduleMode = (
+  mode: AgentScheduledTaskScheduleMode | undefined,
+  scheduleType: AgentScheduledTaskScheduleType | undefined,
+  recurrence: AgentScheduledTaskRecurrence
+): AgentScheduledTaskScheduleMode => {
+  if (
+    mode === "daily" ||
+    mode === "weekly" ||
+    mode === "monthly" ||
+    mode === "yearly" ||
+    mode === "custom_days"
+  ) {
+    return mode;
   }
+
+  if (mode === "once" || scheduleType !== "recurring") {
+    return "once";
+  }
+
+  return recurrence;
+};
+
+const modeToRecurrence = (
+  mode: AgentScheduledTaskScheduleMode
+): AgentScheduledTaskRecurrence | undefined => {
+  return mode === "once" ? undefined : mode;
+};
+
+const findNextDailyRun = (
+  timeOfDay: string | undefined,
+  fromTime: number
+): number | null => {
+  const candidate = dateWithTime(new Date(fromTime), timeOfDay);
+  if (candidate > fromTime) {
+    return candidate;
+  }
+
+  return addDays(candidate, 1);
+};
+
+const findNextWeeklyRun = (
+  weekdays: number[] | undefined,
+  timeOfDay: string | undefined,
+  fromTime: number
+): number | null => {
+  const selectedWeekdays = normalizeNumberList(weekdays, 1, 7, [
+    getChineseWeekday(fromTime),
+  ]);
+  const start = new Date(fromTime);
+
+  for (let offset = 0; offset <= 14; offset += 1) {
+    const candidateDate = new Date(start);
+    candidateDate.setDate(start.getDate() + offset);
+
+    if (!selectedWeekdays.includes(getChineseWeekday(candidateDate.getTime()))) {
+      continue;
+    }
+
+    const candidate = dateWithTime(candidateDate, timeOfDay);
+    if (candidate > fromTime) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
+const findNextMonthlyRun = (
+  monthDays: number[] | undefined,
+  timeOfDay: string | undefined,
+  fromTime: number
+): number | null => {
+  const selectedDays = normalizeNumberList(monthDays, 1, 31, [
+    new Date(fromTime).getDate(),
+  ]).sort((left, right) => left - right);
+  const start = new Date(fromTime);
+
+  for (let monthOffset = 0; monthOffset <= 36; monthOffset += 1) {
+    const monthStart = new Date(start);
+    monthStart.setDate(1);
+    monthStart.setMonth(start.getMonth() + monthOffset);
+    const daysInTargetMonth = getDaysInMonth(
+      monthStart.getFullYear(),
+      monthStart.getMonth()
+    );
+
+    for (const day of selectedDays) {
+      if (day > daysInTargetMonth) {
+        continue;
+      }
+
+      const candidateDate = new Date(monthStart);
+      candidateDate.setDate(day);
+      const candidate = dateWithTime(candidateDate, timeOfDay);
+      if (candidate > fromTime) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+};
+
+const findNextYearlyRun = (
+  month: number | undefined,
+  day: number | undefined,
+  timeOfDay: string | undefined,
+  fromTime: number
+): number | null => {
+  const start = new Date(fromTime);
+  const targetMonth = normalizeRangeNumber(month, 1, 12, start.getMonth() + 1);
+  const targetDay = normalizeRangeNumber(
+    day,
+    1,
+    getDaysInMonth(2028, targetMonth - 1),
+    Math.min(start.getDate(), getDaysInMonth(2028, targetMonth - 1))
+  );
+
+  for (let yearOffset = 0; yearOffset <= 10; yearOffset += 1) {
+    const year = start.getFullYear() + yearOffset;
+    if (targetDay > getDaysInMonth(year, targetMonth - 1)) {
+      continue;
+    }
+
+    const candidateDate = new Date(start);
+    candidateDate.setDate(1);
+    candidateDate.setFullYear(year);
+    candidateDate.setMonth(targetMonth - 1);
+    candidateDate.setDate(targetDay);
+    const candidate = dateWithTime(candidateDate, timeOfDay);
+    if (candidate > fromTime) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
+const dateWithTime = (date: Date, timeOfDay: string | undefined): number => {
+  const [hours, minutes] = normalizeAgentTaskTimeOfDay(timeOfDay, date.getTime())
+    .split(":")
+    .map(Number);
+  const candidate = new Date(date);
+  candidate.setHours(hours, minutes, 0, 0);
+  return candidate.getTime();
+};
+
+const normalizeNumberList = (
+  value: number[] | undefined,
+  min: number,
+  max: number,
+  fallback: number[]
+): number[] => {
+  const normalized = Array.isArray(value)
+    ? Array.from(
+        new Set(
+          value
+            .map((item) => Math.round(Number(item)))
+            .filter((item) => Number.isFinite(item) && item >= min && item <= max)
+        )
+      )
+    : [];
+
+  return normalized.length ? normalized : fallback;
+};
+
+const normalizeRangeNumber = (
+  value: number | undefined,
+  min: number,
+  max: number,
+  fallback: number
+): number => {
+  const normalized = Math.round(Number(value));
+  if (!Number.isFinite(normalized)) {
+    return fallback;
+  }
+
+  return Math.min(Math.max(normalized, min), max);
+};
+
+const getChineseWeekday = (timestamp: number): number => {
+  const day = new Date(timestamp).getDay();
+  return day === 0 ? 7 : day;
 };
 
 const addDays = (timestamp: number, days: number): number => {
@@ -730,32 +978,12 @@ const addDays = (timestamp: number, days: number): number => {
   return date.getTime();
 };
 
-const addMonthsClamped = (timestamp: number, months: number): number => {
-  const source = new Date(timestamp);
-  const target = new Date(source);
-  const sourceDay = source.getDate();
-
-  target.setDate(1);
-  target.setMonth(target.getMonth() + months);
-  target.setDate(Math.min(sourceDay, getDaysInMonth(target.getFullYear(), target.getMonth())));
-
-  return target.getTime();
-};
-
-const addYearsClamped = (timestamp: number, years: number): number => {
-  const source = new Date(timestamp);
-  const target = new Date(source);
-  const sourceDay = source.getDate();
-
-  target.setDate(1);
-  target.setFullYear(target.getFullYear() + years);
-  target.setDate(Math.min(sourceDay, getDaysInMonth(target.getFullYear(), target.getMonth())));
-
-  return target.getTime();
-};
-
 const getDaysInMonth = (year: number, monthIndex: number): number => {
   return new Date(year, monthIndex + 1, 0).getDate();
+};
+
+const padDateUnit = (value: number): string => {
+  return String(value).padStart(2, "0");
 };
 
 export const createEmptyConversations = (): Record<ModelType, Conversation[]> => ({

@@ -1,5 +1,6 @@
 use crate::ai::types::ChatMessage;
 use crate::config::{load_config, AgentConfig};
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -29,6 +30,7 @@ pub struct AgentFetchedPage {
 #[derive(Debug, Deserialize)]
 pub struct AgentShellPlanRequest {
     pub model: String,
+    #[serde(alias = "userText")]
     pub user_text: String,
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
@@ -46,9 +48,54 @@ pub struct AgentShellPlan {
 #[derive(Debug, Deserialize)]
 pub struct AgentTavilyPlanRequest {
     pub model: String,
+    #[serde(alias = "userText")]
     pub user_text: String,
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentScheduledTaskPlanRequest {
+    pub model: String,
+    #[serde(alias = "userText")]
+    pub user_text: String,
+    #[serde(default)]
+    pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AgentScheduledTaskPlan {
+    pub should_create: bool,
+    #[serde(default)]
+    pub tasks: Vec<AgentScheduledTaskPlanItem>,
+    #[serde(default)]
+    pub reason: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct AgentScheduledTaskPlanItem {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub prompt: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub schedule_mode: String,
+    #[serde(default)]
+    pub scheduled_at: String,
+    #[serde(default)]
+    pub time_of_day: String,
+    #[serde(default)]
+    pub weekdays: Vec<u8>,
+    #[serde(default)]
+    pub month_day: Option<u8>,
+    #[serde(default)]
+    pub year_month: Option<u8>,
+    #[serde(default)]
+    pub year_month_day: Option<u8>,
+    #[serde(default)]
+    pub custom_interval_days: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -276,6 +323,78 @@ query 要简短具体，保留关键实体、时间和限定词。"
     };
 
     parse_tavily_plan(&reply.content)
+}
+
+#[tauri::command]
+pub async fn agent_plan_scheduled_tasks(
+    app: AppHandle,
+    request: AgentScheduledTaskPlanRequest,
+) -> Result<AgentScheduledTaskPlan, String> {
+    let user_text = request.user_text.trim();
+
+    if user_text.is_empty() {
+        return Ok(AgentScheduledTaskPlan {
+            should_create: false,
+            tasks: Vec::new(),
+            reason: "用户输入为空。".into(),
+        });
+    }
+
+    let config = load_config(&app)?;
+    let now = Local::now();
+    let recent_context = compact_agent_context(&request.messages, 12);
+    let planner_messages = vec![
+        ChatMessage::text(
+            "system",
+            format!(
+                "你是 MuNan AI 的计划任务规划器。你只负责把用户关于未来提醒、闹钟、日程提醒、周期任务、到点自动查询或到点自动执行的请求，转换成结构化 JSON。\n\
+当前本地时间：{}；ISO：{}。\n\
+输出必须是纯 JSON，不能有 Markdown，格式：{{\"should_create\":true|false,\"tasks\":[...],\"reason\":\"...\"}}。\n\
+如果用户不是在创建未来任务，should_create=false，tasks=[]。\n\
+如果用户要求未来某个时间提醒、告诉、通知、叫醒、执行、查询、播报、汇报、总结、整理，就 should_create=true。\n\
+每个 task 字段：title、prompt、kind、schedule_mode、scheduled_at、time_of_day、weekdays、month_day、year_month、year_month_day、custom_interval_days。\n\
+kind 只能是 reminder 或 ai_prompt。普通提醒/闹钟用 reminder；需要到点后查询天气、联网搜索、总结、整理、生成内容、执行 AI 判断的任务用 ai_prompt。\n\
+schedule_mode 只能是 once、daily、weekly、monthly、yearly、custom_days。\n\
+once 必须写 scheduled_at，使用带本地时区的 ISO 时间；daily 只写 time_of_day；weekly 写 weekdays 和 time_of_day，weekdays 用 1-7 表示周一到周日；monthly 写 month_day 和 time_of_day；yearly 写 year_month、year_month_day 和 time_of_day；custom_days 写 custom_interval_days 和 time_of_day。\n\
+中文时间要按当前本地时间换算：一分钟后、三小时后、明早、今晚、以后每天早晨 9 点、每周一三五下午 6 点、每月 1 号、每年 5 月 1 日、每隔 3 天等都要转换。\n\
+不要编造用户没说的地点、联系人或细节；可以把缺失细节保留在 prompt 里让到点执行时再根据上下文处理。\n\
+示例：用户说“以后每天早晨9告诉我当天天气”，输出 daily、time_of_day=09:00、kind=ai_prompt、prompt=到点后查询当天天气并告知用户。",
+                now.format("%Y-%m-%d %H:%M:%S %:z"),
+                now.to_rfc3339()
+            ),
+        ),
+        ChatMessage::text(
+            "user",
+            format!(
+                "最近对话：\n{}\n\n用户最新需求：\n{}\n\n请规划计划任务并返回 JSON。",
+                recent_context, user_text
+            ),
+        ),
+    ];
+
+    let reply = match request.model.as_str() {
+        "openai" => crate::ai::openai::call_openai(planner_messages, config.openai).await?,
+        "deepseek" => crate::ai::deepseek::call_deepseek(planner_messages, config.deepseek).await?,
+        "qwen" => crate::ai::qwen::call_qwen(planner_messages, config.qwen).await?,
+        "mimo" => crate::ai::mimo::call_mimo(planner_messages, config.mimo).await?,
+        "nvidia" => crate::ai::nvidia::call_nvidia(planner_messages, config.nvidia).await?,
+        _ => {
+            let provider = config
+                .custom_providers
+                .into_iter()
+                .find(|provider| provider.id == request.model)
+                .ok_or_else(|| format!("未知模型: {}", request.model))?;
+            crate::ai::openai_like::chat_api(
+                &provider.base_url,
+                &provider.api_key,
+                &provider.model,
+                planner_messages,
+            )
+            .await?
+        }
+    };
+
+    parse_scheduled_task_plan(&reply.content)
 }
 
 #[tauri::command]
@@ -623,6 +742,33 @@ fn parse_tavily_plan(raw: &str) -> Result<AgentTavilyPlan, String> {
     if plan.should_search && plan.query.is_empty() {
         plan.should_search = false;
         plan.reason = "模型判断需要 Tavily 搜索，但没有给出 query。".into();
+    }
+
+    Ok(plan)
+}
+
+fn parse_scheduled_task_plan(raw: &str) -> Result<AgentScheduledTaskPlan, String> {
+    let json_text = extract_json_object(raw).unwrap_or_else(|| raw.trim().to_string());
+    let mut plan: AgentScheduledTaskPlan = serde_json::from_str(&json_text)
+        .map_err(|error| format!("计划任务规划解析失败: {}。原始响应: {}", error, raw))?;
+
+    plan.reason = plan.reason.trim().to_string();
+    for task in &mut plan.tasks {
+        task.title = task.title.trim().to_string();
+        task.prompt = task.prompt.trim().to_string();
+        task.kind = task.kind.trim().to_lowercase();
+        task.schedule_mode = task.schedule_mode.trim().to_lowercase();
+        task.scheduled_at = task.scheduled_at.trim().to_string();
+        task.time_of_day = task.time_of_day.trim().to_string();
+    }
+
+    plan.tasks.retain(|task| {
+        !task.title.is_empty() && !task.prompt.is_empty() && !task.schedule_mode.is_empty()
+    });
+
+    if plan.should_create && plan.tasks.is_empty() {
+        plan.should_create = false;
+        plan.reason = "模型判断需要创建计划任务，但没有给出有效任务。".into();
     }
 
     Ok(plan)

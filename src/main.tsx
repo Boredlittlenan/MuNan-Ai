@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 
 import App from "./App";
 import Settings from "./Settings";
+import ScheduledTaskRunner from "./ScheduledTaskRunner";
 
 /**
  * 应用入口文件只做三件事：
@@ -16,6 +17,7 @@ import Settings from "./Settings";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
+      <ScheduledTaskRunner />
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/settings" element={<Settings />} />

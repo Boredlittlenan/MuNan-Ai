@@ -486,6 +486,42 @@
   grid-column: 1 / -1;
 }
 
+.agent-schedule-weekday-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-schedule-choice {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.76);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.agent-schedule-choice:hover {
+  transform: translateY(-1px);
+  border-color: rgba(29, 114, 243, 0.28);
+  color: var(--text-1);
+  background: rgba(239, 246, 255, 0.84);
+}
+
+.agent-schedule-choice.is-selected {
+  border-color: rgba(29, 114, 243, 0.42);
+  color: #0f4bb8;
+  background: rgba(219, 234, 254, 0.86);
+}
+
 .agent-schedule-form__actions {
   grid-column: 1 / -1;
   display: flex;
