@@ -4,9 +4,30 @@ pub mod config;
 pub mod speech;
 pub mod storage;
 
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Manager, Runtime, WindowEvent,
+};
+
+const MAIN_WINDOW_LABEL: &str = "main";
+const TRAY_SHOW_MAIN_ID: &str = "tray-show-main";
+const TRAY_OPEN_SETTINGS_ID: &str = "tray-open-settings";
+const TRAY_EXIT_ID: &str = "tray-exit";
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            setup_tray(app.handle())?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::agent::agent_fetch_url_text,
@@ -30,4 +51,54 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let show_main = MenuItem::with_id(app, TRAY_SHOW_MAIN_ID, "显示主界面", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, TRAY_OPEN_SETTINGS_ID, "设置", true, None::<&str>)?;
+    let exit = MenuItem::with_id(app, TRAY_EXIT_ID, "退出", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let menu = Menu::with_items(app, &[&show_main, &settings, &separator, &exit])?;
+
+    let mut tray = TrayIconBuilder::with_id("munan-ai-tray")
+        .menu(&menu)
+        .tooltip("MuNan AI")
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_SHOW_MAIN_ID => show_main_window(app, "/"),
+            TRAY_OPEN_SETTINGS_ID => show_main_window(app, "/settings"),
+            TRAY_EXIT_ID => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                ..
+            }
+            | TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle(), "/");
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+
+    tray.build(app)?;
+    Ok(())
+}
+
+fn show_main_window<R: Runtime>(app: &AppHandle<R>, route: &str) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = window.eval(format!(
+            "window.history.pushState(null, '', '{route}'); window.dispatchEvent(new PopStateEvent('popstate'));"
+        ));
+    }
 }
