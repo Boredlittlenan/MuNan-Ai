@@ -4,6 +4,13 @@
 
 当前版本：2.0.0
 
+文档分工：
+
+- `README.md`：项目简介、当前能力和最常用运行命令。
+- `docs/AI_HANDOFF.md`：技术接手、架构脉络、关键文件和常见改动入口。
+- `docs/RELEASE_NOTES_2.0.md`：2.0 版本更新说明。
+- `src-tauri/prompts/chat_response_guide.md`：运行时注入给模型的回复格式提示词，不作为普通维护说明拆分。
+
 ## 1. 软件定位
 
 MuNan AI 是一个基于 Tauri 2 + React + TypeScript + Rust 的桌面端多模型 AI 对话工具。
@@ -39,11 +46,12 @@ MuNan AI 是一个基于 Tauri 2 + React + TypeScript + Rust 的桌面端多模�
 
 ```bash
 pnpm install
-pnpm dev
-pnpm build
 pnpm tauri dev
+pnpm build
 pnpm tauri build
 ```
+
+其中 `pnpm tauri dev` 是桌面开发入口；`pnpm dev` 只启动 Vite 前端开发服务，适合单独调 UI。
 
 Rust 检查：
 
@@ -719,8 +727,8 @@ pnpm tauri dev
 | Token 统计不增长 | `src-tauri/src/commands/chat.rs`, `src-tauri/src/storage.rs`, 供应商响应 `usage` |
 | VoiceDesign 报缺少音色描述 | 设置页 TTS 的“音色描述”字段 |
 | AI 卡片显示异常 | `src/components/ChatMessageBubble.tsx`, `src/styles/App.css`, `src-tauri/prompts/chat_response_guide.md` |
-| 计划任务不创建或不执行 | `src/Settings.tsx`, `src/App.tsx`, `src/ScheduledTaskRunner.tsx`, `src/modelConfig.ts`, `src-tauri/prompts/chat_response_guide.md` |
-| 新增模型下拉选项 | `src/modelConfig.ts` 的 `MODEL_CATALOG` |
+| 计划任务不创建或不执行 | `src/App.tsx`, `src/scheduledTasks/chatScheduledTasks.ts`, `src/ScheduledTaskRunner.tsx`, `src/modelConfig.ts`, `src-tauri/src/commands/agent.rs`, `src-tauri/prompts/chat_response_guide.md` |
+| 新增模型下拉选项 | `src/modelConfig.ts` 的 `MODEL_OPTIONS` 和 `MODEL_CATALOG` |
 | 改窗口大小或标题 | `src-tauri/tauri.conf.json` |
 | 改全局视觉风格 | `src/styles/base.css` |
 | 改聊天气泡样式 | `src/styles/App.css` |

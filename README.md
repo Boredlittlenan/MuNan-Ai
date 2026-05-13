@@ -21,9 +21,17 @@ MuNan AI 是一个基于 Tauri 2 + React + TypeScript + Rust 的桌面端多模�
 
 ## 开发运行
 
+桌面开发优先使用：
+
 ```bash
 pnpm install
 pnpm tauri dev
+```
+
+只启动前端 Vite 开发服务：
+
+```bash
+pnpm dev
 ```
 
 只跑前端构建检查：
@@ -49,8 +57,8 @@ cargo fmt --check
 ## 文档
 
 - `docs/AI_HANDOFF.md`：主要技术说明，适合后续 AI 或开发者快速接手。
-- `docs/ARCHITECTURE.md`：简版架构索引。
 - `docs/RELEASE_NOTES_2.0.md`：2.0 版本更新说明。
+- `src-tauri/prompts/chat_response_guide.md`：运行时模型回复格式提示词，不作为普通维护文档拆分。
 
 ## 注意
 
