@@ -65,3 +65,9 @@ cargo fmt --check
 - `dist/`、`node_modules/`、`src-tauri/target/` 是生成目录。
 - 导出的配置备份可能包含模型密钥，适合个人备份，不要提交到 Git。
 - WebDAV 配置只保存在本机配置中，不会写入导出的备份 JSON。
+
+## License / 许可
+
+This project is source-available for non-commercial use only. Commercial use is not permitted without explicit written permission from Boredlittlenan. See [LICENSE.md](LICENSE.md).
+
+本项目源代码仅允许非商业用途查看、使用、修改和分发。未经 Boredlittlenan 明确书面许可，不允许商用。详见 [LICENSE.md](LICENSE.md)。
